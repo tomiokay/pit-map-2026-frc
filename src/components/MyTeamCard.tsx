@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Pit } from "@/lib/types";
 import { DIVISION_BY_ID } from "@/lib/divisions";
 
@@ -12,9 +12,18 @@ interface Props {
 }
 
 export function MyTeamCard({ myTeam, myPit, onSet, onJump }: Props) {
-  const [editing, setEditing] = useState(myTeam == null);
+  // Show the editor when the user explicitly hits "Change" OR when no team
+  // is saved at all. Tracking these as separate concerns makes the display
+  // collapse correctly once useMyTeam hydrates from localStorage.
+  const [editingExplicit, setEditingExplicit] = useState(false);
+  const editing = editingExplicit || myTeam == null;
   const [draft, setDraft] = useState(myTeam ? String(myTeam) : "");
   const [error, setError] = useState<string | null>(null);
+
+  // Keep the draft in sync once the persisted team loads in.
+  useEffect(() => {
+    if (myTeam != null) setDraft(String(myTeam));
+  }, [myTeam]);
 
   const submit = () => {
     const n = Number(draft.trim());
@@ -24,12 +33,8 @@ export function MyTeamCard({ myTeam, myPit, onSet, onJump }: Props) {
     }
     setError(null);
     onSet(n);
-    setEditing(false);
+    setEditingExplicit(false);
   };
-
-  if (myTeam == null && !editing) {
-    return null;
-  }
 
   if (editing) {
     return (
@@ -61,7 +66,7 @@ export function MyTeamCard({ myTeam, myPit, onSet, onJump }: Props) {
           {myTeam != null && (
             <button
               onClick={() => {
-                setEditing(false);
+                setEditingExplicit(false);
                 setDraft(String(myTeam));
                 setError(null);
               }}
@@ -107,7 +112,7 @@ export function MyTeamCard({ myTeam, myPit, onSet, onJump }: Props) {
       </div>
       <button
         onClick={() => {
-          setEditing(true);
+          setEditingExplicit(true);
           setDraft(String(myTeam));
         }}
         className="text-xs text-neutral-400 hover:text-neutral-100 px-2 py-1 rounded-md hover:bg-neutral-800"
