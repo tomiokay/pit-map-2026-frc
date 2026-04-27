@@ -74,6 +74,26 @@ export default function Home() {
     return () => window.clearTimeout(id);
   }, [exactMatch]);
 
+  // Watch each side section so the sticky nav chip auto-updates to whichever
+  // hall is currently in view. Triggers when ~50% of a side's height is in
+  // the middle band of the viewport.
+  useEffect(() => {
+    const observers: IntersectionObserver[] = [];
+    SIDES.forEach((s) => {
+      const el = sectionRefs.current[s.id];
+      if (!el) return;
+      const obs = new IntersectionObserver(
+        ([entry]) => {
+          if (entry.isIntersecting) setActiveSide(s.id);
+        },
+        { rootMargin: "-35% 0px -35% 0px", threshold: 0 }
+      );
+      obs.observe(el);
+      observers.push(obs);
+    });
+    return () => observers.forEach((o) => o.disconnect());
+  }, [pits.length]);
+
   const jumpToPit = (pit: Pit) => {
     const sideId = SIDE_BY_DIVISION[pit.division].id;
     setActiveSide(sideId);
