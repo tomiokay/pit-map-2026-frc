@@ -172,9 +172,27 @@ function pathBetweenPits(
   return best;
 }
 
-/** Greedy nearest-neighbor TSP. Start at home, visit each target by nearest
- *  remaining, optionally end at a specific pit (`endAt`) and/or return home. */
+const samePit = (a: PlacedPit, b: PlacedPit) =>
+  a.division === b.division && a.id === b.id;
+
+/** Plan a walking route. Uses exact Held-Karp DP for ≤12 stops (truly
+ *  optimal) and falls back to greedy nearest-neighbour for larger trips. */
 export function planRoute(
+  home: PlacedPit,
+  visit: PlacedPit[],
+  grid: WalkableGrid,
+  options: { returnHome?: boolean; endAt?: PlacedPit } = {}
+): RoutePlan {
+  const internal = options.endAt
+    ? visit.filter((v) => !samePit(v, options.endAt!))
+    : visit;
+  if (internal.length <= 12) {
+    return planRouteHeldKarp(home, internal, grid, options);
+  }
+  return planRouteGreedy(home, internal, grid, options);
+}
+
+function planRouteGreedy(
   home: PlacedPit,
   visit: PlacedPit[],
   grid: WalkableGrid,
@@ -182,12 +200,7 @@ export function planRoute(
 ): RoutePlan {
   const stops: RouteStop[] = [{ pit: home, pathFromPrev: [] }];
   const endAt = options.endAt;
-  const samePit = (a: PlacedPit, b: PlacedPit) =>
-    a.division === b.division && a.id === b.id;
-  // If endAt is set, hold it out of nearest-neighbor and append it last.
-  const remaining = endAt
-    ? visit.filter((v) => !samePit(v, endAt))
-    : [...visit];
+  const remaining = [...visit];
   const unreachable: PlacedPit[] = [];
   let current = home;
   let totalCells = 0;
@@ -197,8 +210,7 @@ export function planRoute(
     let bestPath: Array<[number, number]> | null = null;
     let bestCost = Infinity;
     for (let i = 0; i < remaining.length; i++) {
-      const candidate = remaining[i];
-      const r = pathBetweenPits(current, candidate, grid);
+      const r = pathBetweenPits(current, remaining[i], grid);
       if (r && r.cost < bestCost) {
         bestCost = r.cost;
         bestPath = r.path;
@@ -209,14 +221,12 @@ export function planRoute(
       unreachable.push(...remaining);
       break;
     }
-    const next = remaining[bestIdx];
-    stops.push({ pit: next, pathFromPrev: bestPath });
+    stops.push({ pit: remaining[bestIdx], pathFromPrev: bestPath });
     totalCells += bestCost;
-    current = next;
+    current = remaining[bestIdx];
     remaining.splice(bestIdx, 1);
   }
 
-  // Force-finish at endAt if provided.
   if (endAt && !samePit(current, endAt)) {
     const finalLeg = pathBetweenPits(current, endAt, grid);
     if (finalLeg) {
@@ -231,6 +241,151 @@ export function planRoute(
     if (back) {
       stops.push({ pit: home, pathFromPrev: back.path });
       totalCells += back.cost;
+    }
+  }
+
+  return { stops, totalCells, unreachable };
+}
+
+/** Exact Held-Karp DP for path TSP. Pre-computes pairwise A* costs once,
+ *  then finds the optimal order in O(N²·2^N) time. Practical for N ≤ ~12. */
+function planRouteHeldKarp(
+  home: PlacedPit,
+  internal: PlacedPit[],
+  grid: WalkableGrid,
+  options: { returnHome?: boolean; endAt?: PlacedPit } = {}
+): RoutePlan {
+  const endAt = options.endAt;
+  const N = internal.length;
+
+  // Pits indexed in cost matrix: 0 = home, 1..N = internal, N+1 = endAt
+  // (endAt is added if specified). Compute pairwise A* paths once.
+  const pits: PlacedPit[] = [home, ...internal];
+  if (endAt) pits.push(endAt);
+  type Edge = { cost: number; path: Array<[number, number]> } | null;
+  const cost: Edge[][] = pits.map((from, i) =>
+    pits.map((to, j) => (i === j ? { cost: 0, path: [] } : pathBetweenPits(from, to, grid)))
+  );
+
+  const unreachable: PlacedPit[] = [];
+  for (let i = 1; i <= N; i++) if (cost[0][i] === null) unreachable.push(internal[i - 1]);
+  if (endAt && cost.every((row) => row[pits.length - 1] === null)) unreachable.push(endAt);
+
+  // Trivial case: no internal visits
+  if (N === 0) {
+    const stops: RouteStop[] = [{ pit: home, pathFromPrev: [] }];
+    let totalCells = 0;
+    if (endAt && cost[0][pits.length - 1]) {
+      const e = cost[0][pits.length - 1]!;
+      stops.push({ pit: endAt, pathFromPrev: e.path });
+      totalCells += e.cost;
+      if (options.returnHome) {
+        const r = pathBetweenPits(endAt, home, grid);
+        if (r) {
+          stops.push({ pit: home, pathFromPrev: r.path });
+          totalCells += r.cost;
+        }
+      }
+    }
+    return { stops, totalCells, unreachable };
+  }
+
+  // Held-Karp DP. mask is a bitset over internal visits (bit i = visit i+1
+  // is included). dp[mask][v] is the cheapest path from home that visits
+  // exactly the set in mask and ends at internal visit v (1..N).
+  const INF = Infinity;
+  const FULL = (1 << N) - 1;
+  const dp: number[][] = Array.from({ length: 1 << N }, () => new Array(N + 1).fill(INF));
+  const par: number[][] = Array.from({ length: 1 << N }, () => new Array(N + 1).fill(-1));
+
+  for (let i = 0; i < N; i++) {
+    if (cost[0][i + 1]) dp[1 << i][i + 1] = cost[0][i + 1]!.cost;
+  }
+
+  for (let mask = 1; mask <= FULL; mask++) {
+    for (let v = 1; v <= N; v++) {
+      const vBit = 1 << (v - 1);
+      if (!(mask & vBit)) continue;
+      if (dp[mask][v] === INF) continue;
+      for (let u = 1; u <= N; u++) {
+        const uBit = 1 << (u - 1);
+        if (mask & uBit) continue;
+        const c = cost[v][u];
+        if (!c) continue;
+        const newMask = mask | uBit;
+        const newCost = dp[mask][v] + c.cost;
+        if (newCost < dp[newMask][u]) {
+          dp[newMask][u] = newCost;
+          par[newMask][u] = v;
+        }
+      }
+    }
+  }
+
+  // Score every possible ending and pick the best, accounting for endAt
+  // and returnHome tails.
+  const endAtIdx = endAt ? pits.length - 1 : -1;
+  let bestEnd = -1;
+  let bestTotal = INF;
+  for (let v = 1; v <= N; v++) {
+    if (dp[FULL][v] === INF) continue;
+    let total = dp[FULL][v];
+    if (endAt) {
+      const tail = cost[v][endAtIdx];
+      if (!tail) continue;
+      total += tail.cost;
+    }
+    if (options.returnHome) {
+      const finalIdx = endAt ? endAtIdx : v;
+      const back = cost[finalIdx][0];
+      if (!back) continue;
+      total += back.cost;
+    }
+    if (total < bestTotal) {
+      bestTotal = total;
+      bestEnd = v;
+    }
+  }
+
+  // No reachable ordering — fall back to whatever greedy can salvage.
+  if (bestEnd < 0) return planRouteGreedy(home, internal, grid, options);
+
+  // Reconstruct the order of internal visits.
+  const order: number[] = [];
+  let cur = bestEnd;
+  let mask = FULL;
+  while (cur >= 1) {
+    order.unshift(cur);
+    const prev = par[mask][cur];
+    mask ^= 1 << (cur - 1);
+    if (prev < 1) break;
+    cur = prev;
+  }
+
+  const stops: RouteStop[] = [{ pit: home, pathFromPrev: [] }];
+  let totalCells = 0;
+  let prevIdx = 0;
+  for (const v of order) {
+    const c = cost[prevIdx][v]!;
+    stops.push({ pit: pits[v], pathFromPrev: c.path });
+    totalCells += c.cost;
+    prevIdx = v;
+  }
+
+  if (endAt) {
+    const c = cost[prevIdx][endAtIdx];
+    if (c) {
+      stops.push({ pit: endAt, pathFromPrev: c.path });
+      totalCells += c.cost;
+      prevIdx = endAtIdx;
+    }
+  }
+
+  if (options.returnHome && !samePit(pits[prevIdx], home)) {
+    const c = cost[prevIdx][0];
+    if (c) {
+      stops.push({ pit: home, pathFromPrev: c.path });
+      totalCells += c.cost;
     }
   }
 

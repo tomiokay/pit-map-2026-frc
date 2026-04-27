@@ -9,6 +9,7 @@ const PITS_OVERRIDE_KEY = "pit-map-pits-override-v1";
 const MY_PIT_KEY = "pit-map-my-pit-v1";
 const MAP_SIZE_KEY = "pit-map-size-v1";
 const MY_TEAM_KEY = "pit-map-my-team-v1";
+const SAVED_ROUTES_KEY = "pit-map-saved-routes-v1";
 
 export type MapSize = "XS" | "S" | "M" | "L";
 
@@ -51,6 +52,72 @@ export function useMyTeam(): {
   }, []);
 
   return { myTeam, setMyTeam };
+}
+
+export interface SavedRoute {
+  id: string;
+  name: string;
+  teams: number[];
+  returnHome: boolean;
+  createdAt: number;
+}
+
+export function useSavedRoutes(): {
+  savedRoutes: SavedRoute[];
+  saveRoute: (name: string, teams: number[], returnHome: boolean) => SavedRoute;
+  deleteRoute: (id: string) => void;
+  renameRoute: (id: string, name: string) => void;
+} {
+  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
+
+  useEffect(() => {
+    setSavedRoutes(readJSON<SavedRoute[]>(SAVED_ROUTES_KEY, []));
+  }, []);
+
+  const persist = useCallback((next: SavedRoute[]) => {
+    setSavedRoutes(next);
+    writeJSON(SAVED_ROUTES_KEY, next);
+  }, []);
+
+  const saveRoute = useCallback(
+    (name: string, teams: number[], returnHome: boolean): SavedRoute => {
+      const route: SavedRoute = {
+        id:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `r-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: name.trim() || `Route of ${teams.length}`,
+        teams: [...teams],
+        returnHome,
+        createdAt: Date.now(),
+      };
+      // Read latest from localStorage in case other tabs wrote since mount.
+      const current = readJSON<SavedRoute[]>(SAVED_ROUTES_KEY, []);
+      persist([route, ...current]);
+      return route;
+    },
+    [persist]
+  );
+
+  const deleteRoute = useCallback(
+    (id: string) => {
+      persist(savedRoutes.filter((r) => r.id !== id));
+    },
+    [persist, savedRoutes]
+  );
+
+  const renameRoute = useCallback(
+    (id: string, name: string) => {
+      persist(
+        savedRoutes.map((r) =>
+          r.id === id ? { ...r, name: name.trim() || r.name } : r
+        )
+      );
+    },
+    [persist, savedRoutes]
+  );
+
+  return { savedRoutes, saveRoute, deleteRoute, renameRoute };
 }
 
 function readJSON<T>(key: string, fallback: T): T {

@@ -10,6 +10,7 @@ import {
   planRoute,
   type RoutePlan,
 } from "@/lib/router";
+import { useSavedRoutes, type SavedRoute } from "@/lib/store";
 
 export interface PlannedSideRoute {
   sideId: string;
@@ -33,6 +34,9 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [returnHome, setReturnHome] = useState(true);
+  const [saveDraftName, setSaveDraftName] = useState("");
+  const [showSaveInput, setShowSaveInput] = useState(false);
+  const { savedRoutes, saveRoute, deleteRoute } = useSavedRoutes();
 
   const pitByTeam = useMemo(() => {
     const m = new Map<number, Pit>();
@@ -56,13 +60,18 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
     .filter((r): r is { team: number; pit: Pit } => r.pit !== null);
   const missing = requestedTeams.filter((t) => !pitByTeam.has(t));
 
-  const handlePlan = () => {
-    if (myTeam == null) return;
+  const computePlans = (
+    teams: number[],
+    rh: boolean
+  ): PlannedSideRoute[] => {
+    if (myTeam == null) return [];
     const homePit = pitByTeam.get(myTeam);
-    if (!homePit) return;
-
+    if (!homePit) return [];
     const homeSideId = SIDE_BY_DIVISION[homePit.division].id;
-    const otherHallHasVisits = recognized.some(
+    const recognizedList = teams
+      .map((t) => ({ team: t, pit: pitByTeam.get(t) ?? null }))
+      .filter((r): r is { team: number; pit: Pit } => r.pit !== null);
+    const otherHallHasVisits = recognizedList.some(
       (r) => SIDE_BY_DIVISION[r.pit.division].id !== homeSideId
     );
 
@@ -81,7 +90,7 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
       const homePlaced = placed.find(
         (p) => p.division === homePit.division && p.id === homePit.id
       );
-      const visits = recognized
+      const visits = recognizedList
         .filter((r) => sidePits.has(r.pit.division))
         .map((r) =>
           placed.find((p) => p.division === r.pit.division && p.id === r.pit.id)!
@@ -123,7 +132,7 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
       const planReturn = isHomeHall
         ? otherHallHasVisits
           ? false
-          : returnHome
+          : rh
         : true;
       const plan = planRoute(anchor, stopsList, grid, {
         returnHome: planReturn,
@@ -131,12 +140,32 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
       });
       plans.push({ sideId: side.id, plan });
     }
-    onPlan(plans);
+    return plans;
+  };
+
+  const handlePlan = () => {
+    onPlan(computePlans(recognized.map((r) => r.team), returnHome));
   };
 
   const handleClear = () => {
     setText("");
     onPlan([]);
+    setShowSaveInput(false);
+    setSaveDraftName("");
+  };
+
+  const handleSave = () => {
+    if (recognized.length === 0) return;
+    const teamList = recognized.map((r) => r.team);
+    saveRoute(saveDraftName, teamList, returnHome);
+    setSaveDraftName("");
+    setShowSaveInput(false);
+  };
+
+  const loadSavedRoute = (route: SavedRoute) => {
+    setText(route.teams.join(", "));
+    setReturnHome(route.returnHome);
+    onPlan(computePlans(route.teams, route.returnHome));
   };
 
   if (myTeam == null) return null;
@@ -171,6 +200,38 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
             ⚠ Pit assignments may have transcription errors. Always verify with
             the official event map before walking off.
           </p>
+          {savedRoutes.length > 0 && (
+            <div className="space-y-1">
+              <div className="text-[10px] uppercase tracking-widest text-neutral-500">
+                Saved routes
+              </div>
+              <ul className="flex flex-wrap gap-1.5">
+                {savedRoutes.map((sr) => (
+                  <li
+                    key={sr.id}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-neutral-900 border border-neutral-700 hover:border-amber-500"
+                  >
+                    <button
+                      onClick={() => loadSavedRoute(sr)}
+                      className="text-neutral-200 hover:text-amber-300 tabular-nums"
+                    >
+                      {sr.name}
+                      <span className="ml-1 text-neutral-500">
+                        ({sr.teams.length})
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => deleteRoute(sr.id)}
+                      aria-label={`Delete saved route ${sr.name}`}
+                      className="text-neutral-600 hover:text-rose-400 leading-none"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div>
             <label className="text-xs text-neutral-400 block mb-1">
               Teams to visit (comma- or newline-separated)
@@ -214,7 +275,7 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
             />
             Return to my pit at the end
           </label>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handlePlan}
               disabled={recognized.length === 0}
@@ -228,7 +289,43 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
             >
               Clear
             </button>
+            {recognized.length > 0 && !showSaveInput && (
+              <button
+                onClick={() => setShowSaveInput(true)}
+                className="text-sm px-3 py-1.5 rounded-md bg-emerald-500 text-neutral-950 font-semibold hover:bg-emerald-400"
+              >
+                Save…
+              </button>
+            )}
           </div>
+          {showSaveInput && (
+            <div className="flex gap-2 items-center">
+              <input
+                type="text"
+                value={saveDraftName}
+                onChange={(e) => setSaveDraftName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSave()}
+                placeholder="Name this route (e.g. Friday morning rounds)"
+                className="flex-1 rounded-md bg-neutral-950 border border-neutral-700 px-3 py-1.5 text-sm text-neutral-100"
+                autoFocus
+              />
+              <button
+                onClick={handleSave}
+                className="text-sm px-3 py-1.5 rounded-md bg-emerald-500 text-neutral-950 font-semibold hover:bg-emerald-400"
+              >
+                Save
+              </button>
+              <button
+                onClick={() => {
+                  setShowSaveInput(false);
+                  setSaveDraftName("");
+                }}
+                className="text-sm px-2 py-1.5 rounded-md text-neutral-400 hover:text-neutral-200"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
 
           {routes.length > 0 && (
             <div className="pt-2 border-t border-neutral-800 space-y-2">
