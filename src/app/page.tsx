@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useFavorites, usePits } from "@/lib/store";
+import { useFavorites, useMapSize, usePits } from "@/lib/store";
 import type { Pit } from "@/lib/types";
 import { SIDES, SIDE_BY_DIVISION } from "@/lib/sides";
 import { SearchBar } from "@/components/SearchBar";
@@ -16,6 +16,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 export default function Home() {
   const { pits, setPits, resetPits, isOverridden } = usePits();
   const { favorites, isFavorite, toggle, clear } = useFavorites();
+  const { size, setSize } = useMapSize();
   const [query, setQuery] = useState("");
   const [activeSide, setActiveSide] = useState<string>("left");
   const [highlightedTeam, setHighlightedTeam] = useState<number | null>(null);
@@ -193,7 +194,7 @@ export default function Home() {
 
         <Legend />
 
-        <nav className="flex flex-wrap gap-2 sticky top-[88px] z-20 bg-neutral-950 py-2 -mx-1 px-1 border-b border-neutral-800/80">
+        <nav className="flex flex-wrap items-center gap-2 sticky top-[88px] z-20 bg-neutral-950 py-2 -mx-1 px-1 border-b border-neutral-800/80">
           {SIDES.map((s) => (
             <button
               key={s.id}
@@ -214,6 +215,32 @@ export default function Home() {
               <span className="text-[10px] opacity-70">({s.subtitle.split(" · ").length} divs)</span>
             </button>
           ))}
+          <div
+            className="ml-auto inline-flex rounded-full border border-neutral-800 bg-neutral-900 p-0.5"
+            role="group"
+            aria-label="Map size"
+          >
+            {(["S", "M", "L"] as const).map((sz) => (
+              <button
+                key={sz}
+                onClick={() => setSize(sz)}
+                className={`text-[11px] w-7 h-6 grid place-items-center rounded-full transition ${
+                  size === sz
+                    ? "bg-amber-500 text-neutral-950 font-bold"
+                    : "text-neutral-400 hover:text-neutral-100"
+                }`}
+                title={
+                  sz === "S"
+                    ? "Small — see more of the map at once"
+                    : sz === "M"
+                    ? "Medium (default)"
+                    : "Large — easier to read"
+                }
+              >
+                {sz}
+              </button>
+            ))}
+          </div>
         </nav>
 
         <div className="space-y-6">
@@ -230,6 +257,7 @@ export default function Home() {
                 pits={pits}
                 highlightedTeam={highlightedTeam}
                 favorites={favorites}
+                size={size}
                 onPitClick={(pit) => {
                   if (pit.team !== null) {
                     setQuery(String(pit.team));

@@ -7,6 +7,25 @@ import { SEED_PITS } from "./pits";
 const FAVORITES_KEY = "pit-map-favorites-v1";
 const PITS_OVERRIDE_KEY = "pit-map-pits-override-v1";
 const MY_PIT_KEY = "pit-map-my-pit-v1";
+const MAP_SIZE_KEY = "pit-map-size-v1";
+
+export type MapSize = "S" | "M" | "L";
+
+export function useMapSize(): {
+  size: MapSize;
+  setSize: (s: MapSize) => void;
+} {
+  const [size, setSizeState] = useState<MapSize>("M");
+  useEffect(() => {
+    const stored = readJSON<MapSize | null>(MAP_SIZE_KEY, null);
+    if (stored && ["S", "M", "L"].includes(stored)) setSizeState(stored);
+  }, []);
+  const setSize = useCallback((s: MapSize) => {
+    setSizeState(s);
+    writeJSON(MAP_SIZE_KEY, s);
+  }, []);
+  return { size, setSize };
+}
 
 function readJSON<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;

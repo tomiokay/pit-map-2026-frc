@@ -4,6 +4,7 @@ import type { Pit } from "@/lib/types";
 import { DIVISION_BY_ID } from "@/lib/divisions";
 import { colorForFavorite } from "@/lib/favoriteColors";
 import type { SideConfig } from "@/lib/sides";
+import type { MapSize } from "@/lib/store";
 
 interface PlacedPit extends Pit {
   gridRow: number;
@@ -15,10 +16,18 @@ interface Props {
   pits: Pit[];
   highlightedTeam: number | null;
   favorites: number[];
+  size?: MapSize;
   onPitClick?: (pit: Pit) => void;
 }
 
-export function SideMap({ side, pits, highlightedTeam, favorites, onPitClick }: Props) {
+const SIZE_PX: Record<MapSize, { cell: number; aisleCol: number; aisleRow: number; gap: number; idText: string; teamText: string }> = {
+  S: { cell: 36, aisleCol: 14, aisleRow: 10, gap: 1, idText: "text-[8px]",  teamText: "text-[10px]" },
+  M: { cell: 60, aisleCol: 28, aisleRow: 16, gap: 3, idText: "text-[10px]", teamText: "text-[13px] sm:text-sm" },
+  L: { cell: 78, aisleCol: 36, aisleRow: 22, gap: 4, idText: "text-[11px]", teamText: "text-base" },
+};
+
+export function SideMap({ side, pits, highlightedTeam, favorites, size = "M", onPitClick }: Props) {
+  const dims = SIZE_PX[size];
   const placed: PlacedPit[] = side.placements.flatMap((placement) => {
     return pits
       .filter((p) => p.division === placement.id)
@@ -48,10 +57,10 @@ export function SideMap({ side, pits, highlightedTeam, favorites, onPitClick }: 
   const colsArr = Array.from({ length: maxGridCol + 1 }, (_, c) => c);
 
   const colTemplate = colsArr
-    .map((c) => (populatedCols.has(c) ? "60px" : "20px"))
+    .map((c) => (populatedCols.has(c) ? `${dims.cell}px` : `${dims.aisleCol}px`))
     .join(" ");
   const rowTemplate = rowsArr
-    .map((r) => (populatedRows.has(r) ? "60px" : "16px"))
+    .map((r) => (populatedRows.has(r) ? `${dims.cell}px` : `${dims.aisleRow}px`))
     .join(" ");
 
   const favSet = new Set(favorites);
@@ -81,10 +90,11 @@ export function SideMap({ side, pits, highlightedTeam, favorites, onPitClick }: 
 
       <div className="w-full overflow-x-auto">
         <div
-          className="grid gap-[3px] select-none mx-auto w-max"
+          className="grid select-none mx-auto w-max"
           style={{
             gridTemplateColumns: colTemplate,
             gridTemplateRows: rowTemplate,
+            gap: `${dims.gap}px`,
           }}
         >
           {rowsArr.map((r) =>
@@ -122,10 +132,10 @@ export function SideMap({ side, pits, highlightedTeam, favorites, onPitClick }: 
                       : `${pit.id} – ${pit.status} (${div.name})`
                   }
                 >
-                  <div className="font-mono text-[10px] leading-none text-neutral-500">
+                  <div className={`font-mono leading-none text-neutral-500 ${dims.idText}`}>
                     {pit.id}
                   </div>
-                  <div className="font-bold tabular-nums text-[13px] sm:text-sm leading-tight mt-0.5">
+                  <div className={`font-bold tabular-nums leading-tight mt-0.5 ${dims.teamText}`}>
                     {pit.status === "TEAM" ? pit.team : pit.status}
                   </div>
                   <span
