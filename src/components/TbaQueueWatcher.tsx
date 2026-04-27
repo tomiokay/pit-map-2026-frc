@@ -1,18 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchAllHoustonMatches,
   HOUSTON_2026_DIVISION_KEYS,
+  shouldRefreshSchedule,
   teamsCurrentlyQueueing,
   type QueueingTeam,
+  type TbaMatch,
 } from "@/lib/tba";
 
 interface Props {
   onQueueingChange: (teams: number[]) => void;
 }
 
-const POLL_MS = 60_000;
+const TICK_MS = 60_000;
 const WINDOW_S = 300;
 const ENABLED_KEY = "pit-map-tba-enabled-v1";
 
@@ -24,6 +26,9 @@ export function TbaQueueWatcher({ onQueueingChange }: Props) {
   const [lastFetched, setLastFetched] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [failedDivisions, setFailedDivisions] = useState<string[]>([]);
+  // Cached match list — refilled only on hard refresh. The minute-by-minute
+  // tick re-evaluates queueing against this cache without a network call.
+  const matchesRef = useRef<TbaMatch[]>([]);
 
   // Restore on/off preference; default to ON.
   useEffect(() => {
@@ -32,26 +37,31 @@ export function TbaQueueWatcher({ onQueueingChange }: Props) {
     if (stored === "0") setEnabled(false);
   }, []);
 
+  const recompute = useCallback(() => {
+    const q = teamsCurrentlyQueueing(matchesRef.current, WINDOW_S);
+    setQueueing(q);
+    onQueueingChange(q.map((t) => t.team));
+  }, [onQueueingChange]);
+
   const refresh = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
       const { matches, failedDivisions: failed } = await fetchAllHoustonMatches();
-      const q = teamsCurrentlyQueueing(matches, WINDOW_S);
-      setQueueing(q);
+      matchesRef.current = matches;
       setFailedDivisions(failed);
-      onQueueingChange(q.map((t) => t.team));
       setLastFetched(Date.now());
       if (failed.length === HOUSTON_2026_DIVISION_KEYS.length) {
         setError("Couldn’t reach TBA — check your TBA_AUTH_KEY env var.");
       }
+      recompute();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fetch failed");
       onQueueingChange([]);
     } finally {
       setIsLoading(false);
     }
-  }, [onQueueingChange]);
+  }, [onQueueingChange, recompute]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -61,10 +71,27 @@ export function TbaQueueWatcher({ onQueueingChange }: Props) {
       onQueueingChange([]);
       return;
     }
+    // Initial pull. Subsequent ticks recompute locally; we only refetch when
+    // the cache is stale (every 30 min) or a playoff match looks overdue.
     void refresh();
-    const id = window.setInterval(() => void refresh(), POLL_MS);
+    const id = window.setInterval(() => {
+      const last = lastFetchedRef.current ?? 0;
+      if (shouldRefreshSchedule(matchesRef.current, last)) {
+        void refresh();
+      } else {
+        recompute();
+      }
+    }, TICK_MS);
     return () => window.clearInterval(id);
-  }, [enabled, refresh, onQueueingChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled]);
+
+  // Mirror lastFetched into a ref so the interval callback can read it
+  // without resubscribing every refresh.
+  const lastFetchedRef = useRef<number | null>(null);
+  useEffect(() => {
+    lastFetchedRef.current = lastFetched;
+  }, [lastFetched]);
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900/40">

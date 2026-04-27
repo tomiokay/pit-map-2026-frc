@@ -65,6 +65,31 @@ export async function fetchAllHoustonMatches(): Promise<{
   return { matches, failedDivisions };
 }
 
+/** Should we re-pull the schedule from TBA?
+ *  - Quals (`qm`) schedules don't change once published, so completion
+ *    alone doesn't trigger a refresh.
+ *  - Playoffs (`sf`, `f`, `qf`, `ef`) generate matches on the fly as the
+ *    bracket advances. If a playoff match is overdue (predicted start was
+ *    >3 min ago and we still see no `actual_time`), the cache is stale.
+ *  - Hard floor: re-pull at least every `staleMs`. */
+export function shouldRefreshSchedule(
+  matches: TbaMatch[],
+  lastFetchedMs: number,
+  staleMs = 30 * 60 * 1000,
+  now: number = Date.now()
+): boolean {
+  if (now - lastFetchedMs > staleMs) return true;
+  const nowSec = now / 1000;
+  for (const m of matches) {
+    if (m.comp_level === "qm") continue;
+    if (m.actual_time !== null) continue;
+    const start = m.predicted_time ?? m.time;
+    if (start === null) continue;
+    if (nowSec - start > 180) return true;
+  }
+  return false;
+}
+
 /** Teams whose match starts within `windowSeconds` seconds and hasn't been
  *  played yet. These are the teams a scout should avoid visiting because
  *  they're queueing or on the field. */
