@@ -28,6 +28,43 @@ export async function fetchEventMatches(eventKey: string): Promise<TbaMatch[]> {
   return (await r.json()) as TbaMatch[];
 }
 
+/**
+ * The 8 division events that share the GRB venue during 2026 Houston Worlds.
+ * Each division is its own TBA event with its own match schedule and queue.
+ */
+export const HOUSTON_2026_DIVISION_KEYS = [
+  "2026arc",
+  "2026cur",
+  "2026dal",
+  "2026gal",
+  "2026hop",
+  "2026joh",
+  "2026mil",
+  "2026new",
+] as const;
+
+export async function fetchAllHoustonMatches(): Promise<{
+  matches: TbaMatch[];
+  failedDivisions: string[];
+}> {
+  const results = await Promise.all(
+    HOUSTON_2026_DIVISION_KEYS.map(async (k) => {
+      try {
+        return { key: k, matches: await fetchEventMatches(k) };
+      } catch {
+        return { key: k, matches: null as TbaMatch[] | null };
+      }
+    })
+  );
+  const matches: TbaMatch[] = [];
+  const failedDivisions: string[] = [];
+  for (const r of results) {
+    if (r.matches === null) failedDivisions.push(r.key);
+    else matches.push(...r.matches);
+  }
+  return { matches, failedDivisions };
+}
+
 /** Teams whose match starts within `windowSeconds` seconds and hasn't been
  *  played yet. These are the teams a scout should avoid visiting because
  *  they're queueing or on the field. */

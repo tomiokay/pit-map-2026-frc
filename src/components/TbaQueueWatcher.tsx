@@ -2,76 +2,69 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  fetchEventMatches,
-  readSavedEventKey,
+  fetchAllHoustonMatches,
+  HOUSTON_2026_DIVISION_KEYS,
   teamsCurrentlyQueueing,
-  writeSavedEventKey,
   type QueueingTeam,
 } from "@/lib/tba";
 
 interface Props {
-  /** Called whenever the queueing-team set changes so the route planner can
-   *  treat them as auto-avoid. */
   onQueueingChange: (teams: number[]) => void;
 }
 
-const POLL_MS = 60_000; // refresh every minute
-const WINDOW_S = 300;   // teams queueing within this many seconds count
+const POLL_MS = 60_000;
+const WINDOW_S = 300;
+const ENABLED_KEY = "pit-map-tba-enabled-v1";
 
 export function TbaQueueWatcher({ onQueueingChange }: Props) {
-  const [eventKey, setEventKey] = useState("");
   const [open, setOpen] = useState(false);
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(true);
   const [queueing, setQueueing] = useState<QueueingTeam[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [failedDivisions, setFailedDivisions] = useState<string[]>([]);
 
+  // Restore on/off preference; default to ON.
   useEffect(() => {
-    const saved = readSavedEventKey();
-    if (saved) {
-      setEventKey(saved);
-      setEnabled(true);
-    }
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(ENABLED_KEY);
+    if (stored === "0") setEnabled(false);
   }, []);
 
-  const refresh = useCallback(
-    async (key: string) => {
-      if (!key) return;
-      setIsLoading(true);
-      setError(null);
-      try {
-        const matches = await fetchEventMatches(key);
-        const q = teamsCurrentlyQueueing(matches, WINDOW_S);
-        setQueueing(q);
-        onQueueingChange(q.map((t) => t.team));
-        setLastFetched(Date.now());
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Fetch failed");
-        onQueueingChange([]);
-      } finally {
-        setIsLoading(false);
+  const refresh = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const { matches, failedDivisions: failed } = await fetchAllHoustonMatches();
+      const q = teamsCurrentlyQueueing(matches, WINDOW_S);
+      setQueueing(q);
+      setFailedDivisions(failed);
+      onQueueingChange(q.map((t) => t.team));
+      setLastFetched(Date.now());
+      if (failed.length === HOUSTON_2026_DIVISION_KEYS.length) {
+        setError("Couldn’t reach TBA — check your TBA_AUTH_KEY env var.");
       }
-    },
-    [onQueueingChange]
-  );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fetch failed");
+      onQueueingChange([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [onQueueingChange]);
 
   useEffect(() => {
-    if (!enabled || !eventKey) {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(ENABLED_KEY, enabled ? "1" : "0");
+    }
+    if (!enabled) {
       onQueueingChange([]);
       return;
     }
-    void refresh(eventKey);
-    const id = window.setInterval(() => void refresh(eventKey), POLL_MS);
+    void refresh();
+    const id = window.setInterval(() => void refresh(), POLL_MS);
     return () => window.clearInterval(id);
-  }, [enabled, eventKey, refresh, onQueueingChange]);
-
-  const toggleEnabled = () => {
-    if (!eventKey.trim()) return;
-    const next = !enabled;
-    setEnabled(next);
-    writeSavedEventKey(next ? eventKey.trim() : "");
-  };
+  }, [enabled, refresh, onQueueingChange]);
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900/40">
@@ -87,9 +80,14 @@ export function TbaQueueWatcher({ onQueueingChange }: Props) {
               {queueing.length} queueing
             </span>
           )}
-          {enabled && queueing.length === 0 && (
+          {enabled && queueing.length === 0 && !error && lastFetched && (
             <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
               none queueing
+            </span>
+          )}
+          {!enabled && (
+            <span className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500">
+              off
             </span>
           )}
         </span>
@@ -98,51 +96,47 @@ export function TbaQueueWatcher({ onQueueingChange }: Props) {
       {open && (
         <div className="px-4 pb-4 space-y-3">
           <p className="text-[11px] text-neutral-400">
-            Pulls the match schedule from The Blue Alliance and auto-adds any
-            team queueing or on the field within the next {WINDOW_S / 60} min
-            to your route’s “avoid” list. Refreshes every minute.
+            Pulls match schedules for all 8 Houston divisions ({" "}
+            {HOUSTON_2026_DIVISION_KEYS.join(", ")}) from The Blue Alliance and
+            auto-adds teams queueing or on the field within the next{" "}
+            {WINDOW_S / 60} min to your route’s avoid list. Refreshes every
+            minute.
           </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={eventKey}
-              onChange={(e) => setEventKey(e.target.value.trim())}
-              placeholder="Event key — e.g. 2026hou"
-              className="flex-1 rounded-md bg-neutral-950 border border-neutral-700 focus:border-amber-400 outline-none px-3 py-1.5 font-mono text-sm text-neutral-200"
-            />
+          <div className="flex items-center gap-2">
             <button
-              onClick={toggleEnabled}
-              disabled={!eventKey.trim()}
+              onClick={() => setEnabled((e) => !e)}
               className={`text-sm px-3 py-1.5 rounded-md font-semibold transition ${
                 enabled
                   ? "bg-rose-500 text-neutral-950 hover:bg-rose-400"
                   : "bg-amber-500 text-neutral-950 hover:bg-amber-400"
-              } disabled:opacity-40`}
+              }`}
             >
-              {enabled ? "Stop" : "Start"}
+              {enabled ? "Stop tracking" : "Start tracking"}
             </button>
-          </div>
-          {enabled && (
-            <div className="text-[11px] text-neutral-500 flex items-center gap-2">
-              {isLoading ? "Refreshing…" : null}
-              {!isLoading && lastFetched && (
-                <>Last refresh: {new Date(lastFetched).toLocaleTimeString()}</>
-              )}
+            {enabled && (
               <button
-                onClick={() => void refresh(eventKey)}
-                className="ml-auto text-neutral-300 hover:text-amber-300"
+                onClick={() => void refresh()}
+                disabled={isLoading}
+                className="text-xs px-3 py-1.5 rounded-md bg-neutral-800 text-neutral-200 hover:bg-neutral-700 disabled:opacity-50"
               >
-                Refresh now
+                {isLoading ? "Refreshing…" : "Refresh now"}
               </button>
-            </div>
-          )}
-          {error && (
-            <p className="text-xs text-rose-300">
-              {error}
-              {error.includes("404") && " — check the event key spelling."}
-              {error.includes("500") && " — TBA_AUTH_KEY missing on server."}
-            </p>
-          )}
+            )}
+            {enabled && lastFetched && !isLoading && (
+              <span className="text-[11px] text-neutral-500">
+                Last refresh: {new Date(lastFetched).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+          {error && <p className="text-xs text-rose-300">{error}</p>}
+          {failedDivisions.length > 0 &&
+            failedDivisions.length < HOUSTON_2026_DIVISION_KEYS.length && (
+              <p className="text-[11px] text-amber-300/80">
+                Some divisions returned errors:{" "}
+                {failedDivisions.join(", ")}. Other divisions are still being
+                tracked.
+              </p>
+            )}
           {enabled && queueing.length > 0 && (
             <div>
               <div className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">
