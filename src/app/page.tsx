@@ -305,7 +305,22 @@ export default function Home() {
             contain typos — always verify against the official PDF before
             walking off.
           </p>
-          <p className="opacity-60">Favorites & routes are stored in your browser only.</p>
+          <p className="opacity-60">
+            Favorites & routes are stored in your browser only.
+          </p>
+          <p className="pt-3 text-neutral-500">
+            Made by{" "}
+            <span className="text-neutral-300 font-semibold">Athan Wang</span>{" "}
+            ·{" "}
+            <a
+              href="https://www.thebluealliance.com/team/7558"
+              target="_blank"
+              rel="noreferrer"
+              className="text-amber-400 hover:underline tabular-nums"
+            >
+              Team 7558
+            </a>
+          </p>
         </footer>
       </div>
 
