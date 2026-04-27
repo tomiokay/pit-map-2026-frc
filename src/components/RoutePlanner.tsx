@@ -26,6 +26,8 @@ interface Props {
 
 const APPROX_FT_PER_CELL = 7; // each grid cell ≈ 7 ft (pit + half aisle)
 const APPROX_FT_PER_MIN = 280; // ≈ 3.2 mph
+const INTER_HALL_FT = 1100;   // rough walk through GRB concourse + admin row
+const INTER_HALL_MIN = INTER_HALL_FT / APPROX_FT_PER_MIN;
 
 export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Props) {
   const [open, setOpen] = useState(false);
@@ -59,8 +61,16 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
     const homePit = pitByTeam.get(myTeam);
     if (!homePit) return;
 
+    const homeSideId = SIDE_BY_DIVISION[homePit.division].id;
+
     const plans: PlannedSideRoute[] = [];
-    for (const side of SIDES) {
+    // Visit the home hall first, then the other hall, so the trip reads as
+    // one continuous walk: home → home-hall stops → concourse → other-hall
+    // stops → concourse → home.
+    const orderedSides = [...SIDES].sort((a, b) =>
+      a.id === homeSideId ? -1 : b.id === homeSideId ? 1 : 0
+    );
+    for (const side of orderedSides) {
       const placed = placePitsOnSide(side, pits);
       const grid = buildWalkableGrid(placed);
       const sidePits = new Set(side.placements.map((p) => p.id));
@@ -75,19 +85,24 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
         )
         .filter(Boolean);
 
-      // If home is on a different side, we still want to plan the route on
-      // this side — pick a synthetic anchor (the first visit) instead of home.
       if (visits.length === 0) continue;
 
       let anchor = homePlaced;
       let stopsList = visits;
       if (!homePlaced) {
+        // No home pit on this side. Pick the first visit as the entrance —
+        // that's where we'd walk in from the concourse.
         anchor = visits[0];
         stopsList = visits.slice(1);
       }
       if (!anchor) continue;
 
-      const plan = planRoute(anchor, stopsList, grid, { returnHome });
+      // Only the home hall needs a "return to home" stop. Other halls
+      // simply end at their last visit; the user walks back to the home
+      // hall via the concourse, where the home hall's return-to-home
+      // segment kicks in.
+      const planReturn = returnHome && side.id === homeSideId;
+      const plan = planRoute(anchor, stopsList, grid, { returnHome: planReturn });
       plans.push({ sideId: side.id, plan });
     }
     onPlan(plans);
@@ -101,7 +116,10 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
   if (myTeam == null) return null;
 
   const totalCells = routes.reduce((sum, r) => sum + r.plan.totalCells, 0);
-  const ft = totalCells * APPROX_FT_PER_CELL;
+  const inHallFt = totalCells * APPROX_FT_PER_CELL;
+  const interHallTrips = routes.length >= 2 ? (returnHome ? 2 : 1) : 0;
+  const interHallFt = interHallTrips * INTER_HALL_FT;
+  const ft = inHallFt + interHallFt;
   const min = ft / APPROX_FT_PER_MIN;
 
   return (
@@ -190,57 +208,84 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
             <div className="pt-2 border-t border-neutral-800 space-y-2">
               <div className="text-xs text-neutral-400">
                 ≈{ft.toFixed(0)} ft · {min < 1 ? "<1" : min.toFixed(0)} min walk
+                {interHallTrips > 0 && (
+                  <span className="text-neutral-500">
+                    {" "}(includes {interHallTrips} concourse crossing
+                    {interHallTrips === 1 ? "" : "s"} ≈
+                    {(INTER_HALL_MIN * interHallTrips).toFixed(0)} min)
+                  </span>
+                )}
               </div>
-              {routes.map(({ sideId, plan }) => {
-                const side = SIDES.find((s) => s.id === sideId);
-                if (!side) return null;
-                return (
-                  <div key={sideId} className="space-y-1">
-                    <div className="text-[10px] uppercase tracking-widest text-neutral-500">
-                      {side.name} — {plan.stops.length - 1} stops
-                    </div>
-                    <ol className="space-y-1">
-                      {plan.stops.map((stop, idx) => {
-                        const div = DIVISION_BY_ID[stop.pit.division];
-                        const isHome =
-                          idx === 0 ||
-                          (idx === plan.stops.length - 1 && returnHome);
-                        return (
-                          <li
-                            key={`${sideId}-${idx}`}
-                            onClick={() => onJumpToStop(stop.pit)}
-                            className="flex items-center gap-2 text-xs px-2 py-1 rounded-md hover:bg-neutral-900 cursor-pointer"
+              <ol className="space-y-1">
+                {(() => {
+                  const items: React.ReactNode[] = [];
+                  let globalIdx = 0;
+                  routes.forEach(({ sideId, plan }, hallIdx) => {
+                    const side = SIDES.find((s) => s.id === sideId);
+                    if (!side) return;
+
+                    if (hallIdx > 0) {
+                      items.push(
+                        <li
+                          key={`bridge-${sideId}`}
+                          className="flex items-center gap-2 px-2 py-1.5 my-1 rounded-md bg-neutral-950 border border-dashed border-neutral-700 text-[11px] text-neutral-400"
+                        >
+                          <span className="text-base leading-none">🚶</span>
+                          Walk through concourse to {side.name} (~
+                          {INTER_HALL_MIN.toFixed(0)} min)
+                        </li>
+                      );
+                    }
+
+                    plan.stops.forEach((stop, idx) => {
+                      // The plan duplicates home as both first and last when
+                      // returnHome is on. Skip the duplicate "first" home in
+                      // the second render (we'll surface a final return entry
+                      // outside this loop instead).
+                      const isPlanHome =
+                        idx === 0 ||
+                        (idx === plan.stops.length - 1 &&
+                          plan.stops[0].pit.division === stop.pit.division &&
+                          plan.stops[0].pit.id === stop.pit.id);
+                      const div = DIVISION_BY_ID[stop.pit.division];
+                      globalIdx += 1;
+                      const labelChar = isPlanHome
+                        ? idx === 0
+                          ? "S"
+                          : "E"
+                        : String(globalIdx);
+                      items.push(
+                        <li
+                          key={`${sideId}-${idx}`}
+                          onClick={() => onJumpToStop(stop.pit)}
+                          className="flex items-center gap-2 text-xs px-2 py-1 rounded-md hover:bg-neutral-900 cursor-pointer"
+                        >
+                          <span
+                            className={`w-5 h-5 grid place-items-center rounded-full text-[10px] font-bold ${
+                              isPlanHome
+                                ? "bg-emerald-400 text-neutral-950"
+                                : "bg-amber-500 text-neutral-950"
+                            }`}
                           >
-                            <span
-                              className={`w-5 h-5 grid place-items-center rounded-full text-[10px] font-bold ${
-                                isHome
-                                  ? "bg-emerald-400 text-neutral-950"
-                                  : "bg-amber-500 text-neutral-950"
-                              }`}
-                            >
-                              {isHome
-                                ? idx === 0
-                                  ? "S"
-                                  : "E"
-                                : idx}
-                            </span>
-                            <span className={`w-1.5 h-1.5 rounded-full ${div.swatch}`} />
-                            <span className="font-bold tabular-nums w-14 text-amber-400">
-                              {stop.pit.team ?? "—"}
-                            </span>
-                            <span className="text-neutral-300 tabular-nums w-12">
-                              {stop.pit.id}
-                            </span>
-                            <span className="text-neutral-500 truncate flex-1">
-                              {div.name}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ol>
-                  </div>
-                );
-              })}
+                            {labelChar}
+                          </span>
+                          <span className={`w-1.5 h-1.5 rounded-full ${div.swatch}`} />
+                          <span className="font-bold tabular-nums w-14 text-amber-400">
+                            {stop.pit.team ?? "—"}
+                          </span>
+                          <span className="text-neutral-300 tabular-nums w-12">
+                            {stop.pit.id}
+                          </span>
+                          <span className="text-neutral-500 truncate flex-1">
+                            {div.name}
+                          </span>
+                        </li>
+                      );
+                    });
+                  });
+                  return items;
+                })()}
+              </ol>
               {routes.some((r) => r.plan.unreachable.length > 0) && (
                 <p className="text-[11px] text-rose-300">
                   Couldn’t route to some pits — they may be on a different
