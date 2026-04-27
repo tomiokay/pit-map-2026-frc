@@ -75,7 +75,7 @@ function buildSide(
 }
 
 export const SIDES: SideConfig[] = [
-  buildSide("left", "West Hall", "Archimedes · Daly · Curie · Galileo", {
+  buildSide("left", "Hall A", "Archimedes · Daly · Curie · Galileo", {
     tl: "archimedes",
     tr: "daly",
     bl: "curie",
@@ -83,7 +83,7 @@ export const SIDES: SideConfig[] = [
     blRowShift: -1, // Curie starts with an empty row in its data — shift up 1
     brRowShift: -2, // Galileo starts with two empty rows — shift up 2
   }),
-  buildSide("right", "East Hall", "Hopper · Milstein · Johnson · Newton", {
+  buildSide("right", "Hall E", "Hopper · Milstein · Johnson · Newton", {
     tl: "hopper",
     tr: "milstein",
     bl: "johnson",
