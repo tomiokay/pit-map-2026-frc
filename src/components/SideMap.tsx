@@ -85,9 +85,15 @@ export function SideMap({
 
   // Pre-compute pixel positions for all stops in the route + the polyline.
   const routeStops = route?.stops ?? [];
+  // First occurrence wins, so the home pit gets index 0 ("S") even when the
+  // route loops back through it as the final stop.
   const stopIndexByPit = new Map<string, number>();
+  // Track whether a pit also appears as the final stop (return-home case).
+  const isReturnStop = new Map<string, boolean>();
   routeStops.forEach((stop, idx) => {
-    stopIndexByPit.set(`${stop.pit.division}-${stop.pit.id}`, idx);
+    const key = `${stop.pit.division}-${stop.pit.id}`;
+    if (!stopIndexByPit.has(key)) stopIndexByPit.set(key, idx);
+    if (idx === routeStops.length - 1 && idx > 0) isReturnStop.set(key, true);
   });
   const polylinePoints: Array<{ x: number; y: number }> = [];
   if (route) {
@@ -102,11 +108,17 @@ export function SideMap({
       if (i === 0) {
         polylinePoints.push(cellPx);
       } else {
-        // Walk the path's interior cells (skip endpoints since they're
-        // doorways, the visual "jump" from doorway → pit is handled below)
-        const interior = stop.pathFromPrev.slice(0, -1);
-        const interiorPx = pathToPixels(interior, rowSizes, colSizes, dims.gap);
-        polylinePoints.push(...interiorPx, cellPx);
+        // pathFromPrev already includes BOTH doorways (the one next to the
+        // previous pit and the one next to this pit). Including the full
+        // path keeps every segment orthogonal: prev center → prev doorway
+        // → … → curr doorway → curr center.
+        const pathPx = pathToPixels(
+          stop.pathFromPrev,
+          rowSizes,
+          colSizes,
+          dims.gap
+        );
+        polylinePoints.push(...pathPx, cellPx);
       }
     }
   }
@@ -226,28 +238,28 @@ export function SideMap({
                     </span>
                   )}
                   {(() => {
-                    const stopIdx = stopIndexByPit.get(`${pit.division}-${pit.id}`);
+                    const key = `${pit.division}-${pit.id}`;
+                    const stopIdx = stopIndexByPit.get(key);
                     if (stopIdx === undefined) return null;
-                    const isHomeStop =
-                      route &&
-                      ((stopIdx === 0) ||
-                        (stopIdx === route.stops.length - 1 &&
-                          route.stops[0].pit.division === pit.division &&
-                          route.stops[0].pit.id === pit.id));
+                    const isStart = stopIdx === 0;
+                    const isReturn = isReturnStop.get(key) === true;
+                    const label = isStart
+                      ? isReturn
+                        ? "S/E"
+                        : "S"
+                      : String(stopIdx);
                     return (
                       <span
-                        className={`absolute -bottom-1.5 -right-1.5 w-4 h-4 grid place-items-center rounded-full text-[9px] font-bold ring-2 ring-neutral-950 z-20 ${
-                          isHomeStop
+                        className={`absolute -bottom-1.5 -right-1.5 ${
+                          label === "S/E" ? "px-1 w-auto" : "w-4"
+                        } h-4 grid place-items-center rounded-full text-[9px] font-bold ring-2 ring-neutral-950 z-20 ${
+                          isStart
                             ? "bg-emerald-400 text-neutral-950"
                             : "bg-blue-400 text-neutral-950"
                         }`}
                         aria-hidden
                       >
-                        {isHomeStop && stopIdx === 0
-                          ? "S"
-                          : isHomeStop
-                          ? "E"
-                          : stopIdx}
+                        {label}
                       </span>
                     );
                   })()}
