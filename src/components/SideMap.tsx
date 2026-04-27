@@ -95,31 +95,45 @@ export function SideMap({
     if (!stopIndexByPit.has(key)) stopIndexByPit.set(key, idx);
     if (idx === routeStops.length - 1 && idx > 0) isReturnStop.set(key, true);
   });
-  const polylinePoints: Array<{ x: number; y: number }> = [];
-  if (route) {
-    for (let i = 0; i < route.stops.length; i++) {
+  // Build one polyline per "leg" between consecutive stops, each tinted a
+  // different colour so overlapping segments stay readable.
+  type Leg = { id: string; points: string; stroke: string };
+  const legs: Leg[] = [];
+  if (route && route.stops.length > 1) {
+    const legPalette = [
+      "rgb(96 165 250)",   // sky-400
+      "rgb(167 139 250)",  // violet-400
+      "rgb(244 114 182)",  // pink-400
+      "rgb(251 146 60)",   // orange-400
+      "rgb(250 204 21)",   // yellow-400
+      "rgb(74 222 128)",   // green-400
+      "rgb(45 212 191)",   // teal-400
+      "rgb(192 132 252)",  // purple-400
+    ];
+    for (let i = 1; i < route.stops.length; i++) {
+      const prevStop = route.stops[i - 1];
       const stop = route.stops[i];
-      const cellPx = pathToPixels(
+      const prevCenter = pathToPixels(
+        [[prevStop.pit.gridRow, prevStop.pit.gridCol]],
+        rowSizes,
+        colSizes,
+        dims.gap
+      )[0];
+      const stopCenter = pathToPixels(
         [[stop.pit.gridRow, stop.pit.gridCol]],
         rowSizes,
         colSizes,
         dims.gap
       )[0];
-      if (i === 0) {
-        polylinePoints.push(cellPx);
-      } else {
-        // pathFromPrev already includes BOTH doorways (the one next to the
-        // previous pit and the one next to this pit). Including the full
-        // path keeps every segment orthogonal: prev center → prev doorway
-        // → … → curr doorway → curr center.
-        const pathPx = pathToPixels(
-          stop.pathFromPrev,
-          rowSizes,
-          colSizes,
-          dims.gap
-        );
-        polylinePoints.push(...pathPx, cellPx);
-      }
+      const innerPx = pathToPixels(stop.pathFromPrev, rowSizes, colSizes, dims.gap);
+      const points = [prevCenter, ...innerPx, stopCenter]
+        .map((p) => `${p.x},${p.y}`)
+        .join(" ");
+      legs.push({
+        id: `leg-${i}`,
+        points,
+        stroke: legPalette[(i - 1) % legPalette.length],
+      });
     }
   }
 
@@ -148,23 +162,47 @@ export function SideMap({
 
       <div className="w-full overflow-x-auto">
         <div className="relative mx-auto w-max">
-        {polylinePoints.length > 1 && (
+        {legs.length > 0 && (
           <svg
             width={totalWidth}
             height={totalHeight}
             className="absolute inset-0 pointer-events-none z-10"
             viewBox={`0 0 ${totalWidth} ${totalHeight}`}
           >
-            <polyline
-              points={polylinePoints.map((p) => `${p.x},${p.y}`).join(" ")}
-              fill="none"
-              stroke="rgb(96 165 250)"
-              strokeWidth={Math.max(2, dims.cell * 0.06)}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeOpacity="0.95"
-              style={{ filter: "drop-shadow(0 0 4px rgba(96,165,250,0.6))" }}
-            />
+            <defs>
+              {legs.map((leg) => (
+                <marker
+                  key={`arrow-${leg.id}`}
+                  id={`arrow-${side.id}-${leg.id}`}
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                  markerUnits="strokeWidth"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill={leg.stroke} />
+                </marker>
+              ))}
+            </defs>
+            {legs.map((leg) => (
+              <polyline
+                key={leg.id}
+                points={leg.points}
+                fill="none"
+                stroke={leg.stroke}
+                strokeWidth={Math.max(2.5, dims.cell * 0.08)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeOpacity={0.85}
+                markerEnd={`url(#arrow-${side.id}-${leg.id})`}
+                style={{
+                  mixBlendMode: "screen",
+                  filter: `drop-shadow(0 0 3px ${leg.stroke})`,
+                }}
+              />
+            ))}
           </svg>
         )}
         <div
