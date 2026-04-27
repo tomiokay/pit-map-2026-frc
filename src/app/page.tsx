@@ -78,12 +78,27 @@ export default function Home() {
     const sideId = SIDE_BY_DIVISION[pit.division].id;
     setActiveSide(sideId);
     setHighlightedTeam(pit.team);
-    requestAnimationFrame(() => {
+    // Center the actual cell in the viewport, falling back to the side
+    // section if the cell can't be found (e.g. INSP slots have no team).
+    window.setTimeout(() => {
+      if (pit.team !== null) {
+        const cell = document.querySelector<HTMLElement>(
+          `[data-team="${pit.team}"]`
+        );
+        if (cell) {
+          cell.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+            inline: "center",
+          });
+          return;
+        }
+      }
       sectionRefs.current[sideId]?.scrollIntoView({
         behavior: "smooth",
         block: "start",
       });
-    });
+    }, 100);
   };
 
   return (
