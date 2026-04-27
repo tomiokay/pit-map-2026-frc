@@ -26,8 +26,8 @@ export interface SideConfig {
  * so divisions sit edge-to-edge with a small aisle between them.
  */
 
-// Conjoined: divisions on the same side share walls — no aisle column or
-// row inserted between them. Each division still has its own internal
+// Conjoined: divisions on the same side share walls — no aisle row or
+// column inserted between them. Each division still has its own internal
 // aisle gaps from empty spreadsheet rows/cols.
 const SIDE_GAP_COLS = 0;
 const SIDE_GAP_ROWS = 0;
@@ -44,24 +44,32 @@ function buildSide(
   id: SideId,
   name: string,
   subtitle: string,
-  layout: { tl: DivisionId; tr: DivisionId; bl: DivisionId; br: DivisionId }
+  layout: {
+    tl: DivisionId;
+    tr: DivisionId;
+    bl: DivisionId;
+    br: DivisionId;
+    /** Manual row nudges so each bottom block lines up with its top neighbor.
+     *  Negative = move up. Used because some divisions start with empty
+     *  spreadsheet rows that look like a phantom gap. */
+    blRowShift?: number;
+    brRowShift?: number;
+  }
 ): SideConfig {
   const tlCols = maxCol(layout.tl) + 1;
   const tlRows = maxRow(layout.tl) + 1;
   const trRows = maxRow(layout.tr) + 1;
-  const blCols = maxCol(layout.bl) + 1;
-  const leftSlotCols = Math.max(tlCols, blCols);
-  const topSlotRows = Math.max(tlRows, trRows);
-
+  const blShift = layout.blRowShift ?? 0;
+  const brShift = layout.brRowShift ?? 0;
   return {
     id,
     name,
     subtitle,
     placements: [
-      { id: layout.tl, rowOffset: 0, colOffset: 0 },
-      { id: layout.tr, rowOffset: 0, colOffset: leftSlotCols + SIDE_GAP_COLS },
-      { id: layout.bl, rowOffset: topSlotRows + SIDE_GAP_ROWS, colOffset: 0 },
-      { id: layout.br, rowOffset: topSlotRows + SIDE_GAP_ROWS, colOffset: leftSlotCols + SIDE_GAP_COLS },
+      { id: layout.tl, rowOffset: 0,                                   colOffset: 0 },
+      { id: layout.tr, rowOffset: 0,                                   colOffset: tlCols + SIDE_GAP_COLS },
+      { id: layout.bl, rowOffset: tlRows + SIDE_GAP_ROWS + blShift,    colOffset: 0 },
+      { id: layout.br, rowOffset: trRows + SIDE_GAP_ROWS + brShift,    colOffset: tlCols + SIDE_GAP_COLS },
     ],
   };
 }
@@ -72,12 +80,16 @@ export const SIDES: SideConfig[] = [
     tr: "daly",
     bl: "curie",
     br: "galileo",
+    blRowShift: -1, // Curie starts with an empty row in its data — shift up 1
+    brRowShift: -2, // Galileo starts with two empty rows — shift up 2
   }),
   buildSide("right", "East Hall", "Hopper · Milstein · Johnson · Newton", {
     tl: "hopper",
     tr: "milstein",
     bl: "johnson",
     br: "newton",
+    blRowShift: -2, // Johnson up 2
+    brRowShift: -1, // Newton up 1
   }),
 ];
 

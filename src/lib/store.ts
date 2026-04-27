@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Pit } from "./types";
+import type { DivisionId, Pit } from "./types";
 import { SEED_PITS } from "./pits";
 
 const FAVORITES_KEY = "pit-map-favorites-v1";
 const PITS_OVERRIDE_KEY = "pit-map-pits-override-v1";
+const MY_PIT_KEY = "pit-map-my-pit-v1";
 
 function readJSON<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -92,4 +93,32 @@ export function useFavorites(): {
   const clear = useCallback(() => persist([]), [persist]);
 
   return { favorites, isFavorite, toggle, clear };
+}
+
+export interface MyPit {
+  pitId: string;
+  division: DivisionId;
+  team: number | null;
+}
+
+export function useMyPit(): {
+  myPit: MyPit | null;
+  setMyPit: (p: MyPit | null) => void;
+} {
+  const [myPit, setMyPitState] = useState<MyPit | null>(null);
+
+  useEffect(() => {
+    setMyPitState(readJSON<MyPit | null>(MY_PIT_KEY, null));
+  }, []);
+
+  const setMyPit = useCallback((p: MyPit | null) => {
+    setMyPitState(p);
+    if (p) {
+      writeJSON(MY_PIT_KEY, p);
+    } else if (typeof window !== "undefined") {
+      window.localStorage.removeItem(MY_PIT_KEY);
+    }
+  }, []);
+
+  return { myPit, setMyPit };
 }

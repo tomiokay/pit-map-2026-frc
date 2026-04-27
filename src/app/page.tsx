@@ -10,6 +10,7 @@ import { FavoritesList } from "@/components/FavoritesList";
 import { SideMap } from "@/components/SideMap";
 import { CsvImporter } from "@/components/CsvImporter";
 import { Legend } from "@/components/Legend";
+import { LocationPanel } from "@/components/LocationPanel";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function Home() {
@@ -47,8 +48,9 @@ export default function Home() {
     }
   }, [exactMatch, query]);
 
-  // Jump back to the top of the page whenever the search becomes active
-  // or lands on an exact match, so the result card is always in view.
+  // Jump back to the top of the page on the first keystroke so the result
+  // card animates in. After we get an exact match, scroll the matching cell
+  // into the center of the viewport so the user can see it on the map.
   const wasEmpty = useRef(true);
   useEffect(() => {
     const isEmpty = !query.trim();
@@ -57,10 +59,19 @@ export default function Home() {
     }
     wasEmpty.current = isEmpty;
   }, [query]);
+
   useEffect(() => {
-    if (exactMatch) {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
+    if (!exactMatch) return;
+    const team = exactMatch.team;
+    // Wait a tick so the right side map is mounted/visible (state may have
+    // just flipped activeSide above) before we try to find the cell.
+    const id = window.setTimeout(() => {
+      const cell = document.querySelector<HTMLElement>(`[data-team="${team}"]`);
+      if (cell) {
+        cell.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+      }
+    }, 350);
+    return () => window.clearTimeout(id);
   }, [exactMatch]);
 
   const jumpToPit = (pit: Pit) => {
@@ -142,6 +153,8 @@ export default function Home() {
           onJump={jumpToPit}
           onClear={clear}
         />
+
+        <LocationPanel />
 
         <Legend />
 

@@ -113,6 +113,8 @@ export function SideMap({ side, pits, highlightedTeam, favorites, onPitClick }: 
                 <button
                   key={`${pit.division}-${pit.id}`}
                   onClick={() => onPitClick?.(pit)}
+                  data-team={pit.team ?? undefined}
+                  data-pit={pit.id}
                   className={`relative rounded-md border flex flex-col items-center justify-center px-1 text-center transition ${baseColor} ${highlightClass}`}
                   title={
                     pit.team
@@ -127,7 +129,7 @@ export function SideMap({ side, pits, highlightedTeam, favorites, onPitClick }: 
                     {pit.status === "TEAM" ? pit.team : pit.status}
                   </div>
                   <span
-                    className={`absolute top-0 left-0.5 w-1 h-1 rounded-full ${div.swatch} opacity-70`}
+                    className={`absolute top-0.5 left-0.5 w-1.5 h-1.5 rounded-full ${div.swatch} ring-1 ring-neutral-950/40`}
                     aria-hidden
                   />
                   {isFav && pit.team !== null && (
