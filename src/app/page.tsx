@@ -8,7 +8,6 @@ import { SearchBar } from "@/components/SearchBar";
 import { TeamResult } from "@/components/TeamResult";
 import { FavoritesList } from "@/components/FavoritesList";
 import { SideMap } from "@/components/SideMap";
-import { CsvImporter } from "@/components/CsvImporter";
 import { Legend } from "@/components/Legend";
 import { LocationPanel } from "@/components/LocationPanel";
 import { MyTeamCard } from "@/components/MyTeamCard";
@@ -17,7 +16,7 @@ import { TbaQueueWatcher } from "@/components/TbaQueueWatcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function Home() {
-  const { pits, setPits, resetPits, isOverridden } = usePits();
+  const { pits } = usePits();
   const { favorites, isFavorite, toggle, clear } = useFavorites();
   const { size, setSize } = useMapSize();
   const { myTeam, setMyTeam } = useMyTeam();
@@ -300,20 +299,13 @@ export default function Home() {
           ))}
         </div>
 
-        <CsvImporter
-          pits={pits}
-          onLoad={setPits}
-          onReset={resetPits}
-          isOverridden={isOverridden}
-        />
-
         <footer className="text-xs text-neutral-600 pt-6 pb-12 text-center space-y-1">
           <p>
-            Bundled pit data was transcribed from the official maps and may contain typos.
-            Verify against the official PDF before relying in the field — use the import panel
-            above to overwrite with corrections.
+            Bundled pit data was transcribed from the official maps and may
+            contain typos — always verify against the official PDF before
+            walking off.
           </p>
-          <p className="opacity-60">Favorites & overrides are stored in your browser only.</p>
+          <p className="opacity-60">Favorites & routes are stored in your browser only.</p>
         </footer>
       </div>
 
