@@ -20,10 +20,11 @@ interface Props {
   onPitClick?: (pit: Pit) => void;
 }
 
-const SIZE_PX: Record<MapSize, { cell: number; aisleCol: number; aisleRow: number; gap: number; idText: string; teamText: string }> = {
-  S: { cell: 36, aisleCol: 14, aisleRow: 10, gap: 1, idText: "text-[8px]",  teamText: "text-[10px]" },
-  M: { cell: 60, aisleCol: 28, aisleRow: 16, gap: 3, idText: "text-[10px]", teamText: "text-[13px] sm:text-sm" },
-  L: { cell: 78, aisleCol: 36, aisleRow: 22, gap: 4, idText: "text-[11px]", teamText: "text-base" },
+const SIZE_PX: Record<MapSize, { cell: number; aisleCol: number; aisleRow: number; gap: number; idText: string; teamText: string; showId: boolean }> = {
+  XS: { cell: 24, aisleCol: 8,  aisleRow: 6,  gap: 1, idText: "hidden",     teamText: "text-[8px]",  showId: false },
+  S:  { cell: 36, aisleCol: 14, aisleRow: 10, gap: 1, idText: "text-[8px]",  teamText: "text-[10px]", showId: true },
+  M:  { cell: 60, aisleCol: 28, aisleRow: 16, gap: 3, idText: "text-[10px]", teamText: "text-[13px] sm:text-sm", showId: true },
+  L:  { cell: 78, aisleCol: 36, aisleRow: 22, gap: 4, idText: "text-[11px]", teamText: "text-base", showId: true },
 };
 
 export function SideMap({ side, pits, highlightedTeam, favorites, size = "M", onPitClick }: Props) {
@@ -132,10 +133,12 @@ export function SideMap({ side, pits, highlightedTeam, favorites, size = "M", on
                       : `${pit.id} – ${pit.status} (${div.name})`
                   }
                 >
-                  <div className={`font-mono leading-none text-neutral-500 ${dims.idText}`}>
-                    {pit.id}
-                  </div>
-                  <div className={`font-bold tabular-nums leading-tight mt-0.5 ${dims.teamText}`}>
+                  {dims.showId && (
+                    <div className={`font-mono leading-none text-neutral-500 ${dims.idText}`}>
+                      {pit.id}
+                    </div>
+                  )}
+                  <div className={`font-bold tabular-nums leading-tight ${dims.showId ? "mt-0.5" : ""} ${dims.teamText}`}>
                     {pit.status === "TEAM" ? pit.team : pit.status}
                   </div>
                   <span

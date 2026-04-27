@@ -220,17 +220,19 @@ export default function Home() {
             role="group"
             aria-label="Map size"
           >
-            {(["S", "M", "L"] as const).map((sz) => (
+            {(["XS", "S", "M", "L"] as const).map((sz) => (
               <button
                 key={sz}
                 onClick={() => setSize(sz)}
-                className={`text-[11px] w-7 h-6 grid place-items-center rounded-full transition ${
+                className={`text-[11px] h-6 px-2 grid place-items-center rounded-full transition ${
                   size === sz
                     ? "bg-amber-500 text-neutral-950 font-bold"
                     : "text-neutral-400 hover:text-neutral-100"
                 }`}
                 title={
-                  sz === "S"
+                  sz === "XS"
+                    ? "Extra small — fit the whole hall on screen"
+                    : sz === "S"
                     ? "Small — see more of the map at once"
                     : sz === "M"
                     ? "Medium (default)"

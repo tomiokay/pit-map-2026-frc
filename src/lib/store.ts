@@ -9,7 +9,7 @@ const PITS_OVERRIDE_KEY = "pit-map-pits-override-v1";
 const MY_PIT_KEY = "pit-map-my-pit-v1";
 const MAP_SIZE_KEY = "pit-map-size-v1";
 
-export type MapSize = "S" | "M" | "L";
+export type MapSize = "XS" | "S" | "M" | "L";
 
 export function useMapSize(): {
   size: MapSize;
@@ -18,7 +18,7 @@ export function useMapSize(): {
   const [size, setSizeState] = useState<MapSize>("M");
   useEffect(() => {
     const stored = readJSON<MapSize | null>(MAP_SIZE_KEY, null);
-    if (stored && ["S", "M", "L"].includes(stored)) setSizeState(stored);
+    if (stored && ["XS", "S", "M", "L"].includes(stored)) setSizeState(stored);
   }, []);
   const setSize = useCallback((s: MapSize) => {
     setSizeState(s);
