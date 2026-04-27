@@ -62,6 +62,9 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
     if (!homePit) return;
 
     const homeSideId = SIDE_BY_DIVISION[homePit.division].id;
+    const otherHallHasVisits = recognized.some(
+      (r) => SIDE_BY_DIVISION[r.pit.division].id !== homeSideId
+    );
 
     const plans: PlannedSideRoute[] = [];
     // Visit the home hall first, then the other hall, so the trip reads as
@@ -89,27 +92,43 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
 
       let anchor = homePlaced;
       let stopsList = visits;
+      let endAt: typeof visits[0] | undefined = undefined;
+      const isHomeHall = side.id === homeSideId;
+
+      // Pick the concourse-facing edge for this side:
+      //   left side (Hall A) → exits/enters on its RIGHT edge
+      //   right side (Hall E) → exits/enters on its LEFT edge
+      const concourseSortByCol = (a: typeof visits[0], b: typeof visits[0]) =>
+        side.id === "left" ? b.gridCol - a.gridCol : a.gridCol - b.gridCol;
+
       if (!homePlaced) {
-        // We're planning the other hall. The user enters from the concourse
-        // on the side closest to their home hall — left edge of Hall E if
-        // home is in Hall A, right edge of Hall A if home is in Hall E. So
-        // pick the visit nearest that edge as both entry and exit, and loop
-        // through the rest from there.
-        const sortByCol =
-          homeSideId === "left"
-            ? (a: typeof visits[0], b: typeof visits[0]) => a.gridCol - b.gridCol
-            : (a: typeof visits[0], b: typeof visits[0]) => b.gridCol - a.gridCol;
-        const sorted = [...visits].sort(sortByCol);
+        // Other hall — anchor at the concourse-side edge so we enter/exit
+        // closest to the home hall.
+        const sorted = [...visits].sort(concourseSortByCol);
         anchor = sorted[0];
         stopsList = sorted.slice(1);
+      } else if (otherHallHasVisits && visits.length > 0) {
+        // Home hall, but the trip continues to the other hall after this.
+        // End on the concourse-side edge so the user can walk straight to
+        // the other hall (Hall A ends on the right, Hall E ends on the left).
+        const sorted = [...visits].sort(concourseSortByCol);
+        endAt = sorted[0];
       }
       if (!anchor) continue;
 
-      // Home hall: respect the user's "return to my pit" toggle.
-      // Other hall: always loop back to the entry pit so the user can walk
-      // back through the concourse the way they came.
-      const planReturn = side.id === homeSideId ? returnHome : true;
-      const plan = planRoute(anchor, stopsList, grid, { returnHome: planReturn });
+      // Plan-options:
+      //   home hall, no other-hall stops → respect the "return to my pit" toggle
+      //   home hall, with other-hall stops → end at concourse-side edge, no return
+      //   other hall → loop back to anchor so the user can retrace through concourse
+      const planReturn = isHomeHall
+        ? otherHallHasVisits
+          ? false
+          : returnHome
+        : true;
+      const plan = planRoute(anchor, stopsList, grid, {
+        returnHome: planReturn,
+        endAt,
+      });
       plans.push({ sideId: side.id, plan });
     }
     onPlan(plans);

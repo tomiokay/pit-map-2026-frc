@@ -173,15 +173,21 @@ function pathBetweenPits(
 }
 
 /** Greedy nearest-neighbor TSP. Start at home, visit each target by nearest
- *  remaining, optionally return to home at the end. */
+ *  remaining, optionally end at a specific pit (`endAt`) and/or return home. */
 export function planRoute(
   home: PlacedPit,
   visit: PlacedPit[],
   grid: WalkableGrid,
-  options: { returnHome?: boolean } = {}
+  options: { returnHome?: boolean; endAt?: PlacedPit } = {}
 ): RoutePlan {
   const stops: RouteStop[] = [{ pit: home, pathFromPrev: [] }];
-  const remaining = [...visit];
+  const endAt = options.endAt;
+  const samePit = (a: PlacedPit, b: PlacedPit) =>
+    a.division === b.division && a.id === b.id;
+  // If endAt is set, hold it out of nearest-neighbor and append it last.
+  const remaining = endAt
+    ? visit.filter((v) => !samePit(v, endAt))
+    : [...visit];
   const unreachable: PlacedPit[] = [];
   let current = home;
   let totalCells = 0;
@@ -210,7 +216,17 @@ export function planRoute(
     remaining.splice(bestIdx, 1);
   }
 
-  if (options.returnHome && stops.length > 1) {
+  // Force-finish at endAt if provided.
+  if (endAt && !samePit(current, endAt)) {
+    const finalLeg = pathBetweenPits(current, endAt, grid);
+    if (finalLeg) {
+      stops.push({ pit: endAt, pathFromPrev: finalLeg.path });
+      totalCells += finalLeg.cost;
+      current = endAt;
+    }
+  }
+
+  if (options.returnHome && stops.length > 1 && !samePit(current, home)) {
     const back = pathBetweenPits(current, home, grid);
     if (back) {
       stops.push({ pit: home, pathFromPrev: back.path });
