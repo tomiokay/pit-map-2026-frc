@@ -8,6 +8,7 @@ const FAVORITES_KEY = "pit-map-favorites-v1";
 const PITS_OVERRIDE_KEY = "pit-map-pits-override-v1";
 const MY_PIT_KEY = "pit-map-my-pit-v1";
 const MAP_SIZE_KEY = "pit-map-size-v1";
+const MY_TEAM_KEY = "pit-map-my-team-v1";
 
 export type MapSize = "XS" | "S" | "M" | "L";
 
@@ -25,6 +26,31 @@ export function useMapSize(): {
     writeJSON(MAP_SIZE_KEY, s);
   }, []);
   return { size, setSize };
+}
+
+export function useMyTeam(): {
+  myTeam: number | null;
+  setMyTeam: (team: number | null) => void;
+} {
+  const [myTeam, setMyTeamState] = useState<number | null>(null);
+
+  useEffect(() => {
+    const stored = readJSON<number | null>(MY_TEAM_KEY, null);
+    if (typeof stored === "number" && Number.isFinite(stored)) {
+      setMyTeamState(stored);
+    }
+  }, []);
+
+  const setMyTeam = useCallback((team: number | null) => {
+    setMyTeamState(team);
+    if (team === null) {
+      if (typeof window !== "undefined") window.localStorage.removeItem(MY_TEAM_KEY);
+    } else {
+      writeJSON(MY_TEAM_KEY, team);
+    }
+  }, []);
+
+  return { myTeam, setMyTeam };
 }
 
 function readJSON<T>(key: string, fallback: T): T {

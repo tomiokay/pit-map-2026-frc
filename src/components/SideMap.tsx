@@ -4,6 +4,7 @@ import type { Pit } from "@/lib/types";
 import { DIVISION_BY_ID } from "@/lib/divisions";
 import { colorForFavorite } from "@/lib/favoriteColors";
 import type { SideConfig } from "@/lib/sides";
+import { pathToPixels, type RoutePlan } from "@/lib/router";
 import type { MapSize } from "@/lib/store";
 
 interface PlacedPit extends Pit {
@@ -17,6 +18,8 @@ interface Props {
   highlightedTeam: number | null;
   favorites: number[];
   size?: MapSize;
+  myTeam?: number | null;
+  route?: RoutePlan | null;
   onPitClick?: (pit: Pit) => void;
 }
 
@@ -27,7 +30,16 @@ const SIZE_PX: Record<MapSize, { cell: number; aisleCol: number; aisleRow: numbe
   L:  { cell: 78, aisleCol: 36, aisleRow: 22, gap: 4, idText: "text-[11px]", teamText: "text-base", showId: true },
 };
 
-export function SideMap({ side, pits, highlightedTeam, favorites, size = "M", onPitClick }: Props) {
+export function SideMap({
+  side,
+  pits,
+  highlightedTeam,
+  favorites,
+  size = "M",
+  myTeam,
+  route,
+  onPitClick,
+}: Props) {
   const dims = SIZE_PX[size];
   const placed: PlacedPit[] = side.placements.flatMap((placement) => {
     return pits
@@ -57,14 +69,47 @@ export function SideMap({ side, pits, highlightedTeam, favorites, size = "M", on
   const rowsArr = Array.from({ length: maxGridRow + 1 }, (_, r) => r);
   const colsArr = Array.from({ length: maxGridCol + 1 }, (_, c) => c);
 
-  const colTemplate = colsArr
-    .map((c) => (populatedCols.has(c) ? `${dims.cell}px` : `${dims.aisleCol}px`))
-    .join(" ");
-  const rowTemplate = rowsArr
-    .map((r) => (populatedRows.has(r) ? `${dims.cell}px` : `${dims.aisleRow}px`))
-    .join(" ");
+  const colSizes = colsArr.map((c) =>
+    populatedCols.has(c) ? dims.cell : dims.aisleCol
+  );
+  const rowSizes = rowsArr.map((r) =>
+    populatedRows.has(r) ? dims.cell : dims.aisleRow
+  );
+  const colTemplate = colSizes.map((s) => `${s}px`).join(" ");
+  const rowTemplate = rowSizes.map((s) => `${s}px`).join(" ");
+
+  const totalWidth = colSizes.reduce((a, b) => a + b, 0) + dims.gap * (colSizes.length - 1);
+  const totalHeight = rowSizes.reduce((a, b) => a + b, 0) + dims.gap * (rowSizes.length - 1);
 
   const favSet = new Set(favorites);
+
+  // Pre-compute pixel positions for all stops in the route + the polyline.
+  const routeStops = route?.stops ?? [];
+  const stopIndexByPit = new Map<string, number>();
+  routeStops.forEach((stop, idx) => {
+    stopIndexByPit.set(`${stop.pit.division}-${stop.pit.id}`, idx);
+  });
+  const polylinePoints: Array<{ x: number; y: number }> = [];
+  if (route) {
+    for (let i = 0; i < route.stops.length; i++) {
+      const stop = route.stops[i];
+      const cellPx = pathToPixels(
+        [[stop.pit.gridRow, stop.pit.gridCol]],
+        rowSizes,
+        colSizes,
+        dims.gap
+      )[0];
+      if (i === 0) {
+        polylinePoints.push(cellPx);
+      } else {
+        // Walk the path's interior cells (skip endpoints since they're
+        // doorways, the visual "jump" from doorway → pit is handled below)
+        const interior = stop.pathFromPrev.slice(0, -1);
+        const interiorPx = pathToPixels(interior, rowSizes, colSizes, dims.gap);
+        polylinePoints.push(...interiorPx, cellPx);
+      }
+    }
+  }
 
   return (
     <section className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 sm:p-5">
@@ -90,8 +135,28 @@ export function SideMap({ side, pits, highlightedTeam, favorites, size = "M", on
       </header>
 
       <div className="w-full overflow-x-auto">
+        <div className="relative mx-auto w-max">
+        {polylinePoints.length > 1 && (
+          <svg
+            width={totalWidth}
+            height={totalHeight}
+            className="absolute inset-0 pointer-events-none z-10"
+            viewBox={`0 0 ${totalWidth} ${totalHeight}`}
+          >
+            <polyline
+              points={polylinePoints.map((p) => `${p.x},${p.y}`).join(" ")}
+              fill="none"
+              stroke="rgb(96 165 250)"
+              strokeWidth={Math.max(2, dims.cell * 0.06)}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeOpacity="0.95"
+              style={{ filter: "drop-shadow(0 0 4px rgba(96,165,250,0.6))" }}
+            />
+          </svg>
+        )}
         <div
-          className="grid select-none mx-auto w-max"
+          className="grid select-none"
           style={{
             gridTemplateColumns: colTemplate,
             gridTemplateRows: rowTemplate,
@@ -151,10 +216,46 @@ export function SideMap({ side, pits, highlightedTeam, favorites, size = "M", on
                       aria-hidden
                     />
                   )}
+                  {pit.team !== null && pit.team === myTeam && (
+                    <span
+                      className="absolute -top-1.5 -left-1.5 w-4 h-4 grid place-items-center rounded-full bg-emerald-400 text-neutral-950 text-[8px] font-black ring-1 ring-neutral-950"
+                      aria-label="My team"
+                      title="My team"
+                    >
+                      ME
+                    </span>
+                  )}
+                  {(() => {
+                    const stopIdx = stopIndexByPit.get(`${pit.division}-${pit.id}`);
+                    if (stopIdx === undefined) return null;
+                    const isHomeStop =
+                      route &&
+                      ((stopIdx === 0) ||
+                        (stopIdx === route.stops.length - 1 &&
+                          route.stops[0].pit.division === pit.division &&
+                          route.stops[0].pit.id === pit.id));
+                    return (
+                      <span
+                        className={`absolute -bottom-1.5 -right-1.5 w-4 h-4 grid place-items-center rounded-full text-[9px] font-bold ring-2 ring-neutral-950 z-20 ${
+                          isHomeStop
+                            ? "bg-emerald-400 text-neutral-950"
+                            : "bg-blue-400 text-neutral-950"
+                        }`}
+                        aria-hidden
+                      >
+                        {isHomeStop && stopIdx === 0
+                          ? "S"
+                          : isHomeStop
+                          ? "E"
+                          : stopIdx}
+                      </span>
+                    );
+                  })()}
                 </button>
               );
             })
           )}
+        </div>
         </div>
       </div>
     </section>

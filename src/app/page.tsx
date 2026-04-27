@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useFavorites, useMapSize, usePits } from "@/lib/store";
+import { useFavorites, useMapSize, useMyTeam, usePits } from "@/lib/store";
 import type { Pit } from "@/lib/types";
 import { SIDES, SIDE_BY_DIVISION } from "@/lib/sides";
 import { SearchBar } from "@/components/SearchBar";
@@ -11,15 +11,19 @@ import { SideMap } from "@/components/SideMap";
 import { CsvImporter } from "@/components/CsvImporter";
 import { Legend } from "@/components/Legend";
 import { LocationPanel } from "@/components/LocationPanel";
+import { MyTeamCard } from "@/components/MyTeamCard";
+import { RoutePlanner, type PlannedSideRoute } from "@/components/RoutePlanner";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function Home() {
   const { pits, setPits, resetPits, isOverridden } = usePits();
   const { favorites, isFavorite, toggle, clear } = useFavorites();
   const { size, setSize } = useMapSize();
+  const { myTeam, setMyTeam } = useMyTeam();
   const [query, setQuery] = useState("");
   const [activeSide, setActiveSide] = useState<string>("left");
   const [highlightedTeam, setHighlightedTeam] = useState<number | null>(null);
+  const [routes, setRoutes] = useState<PlannedSideRoute[]>([]);
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const pitByTeam = useMemo(() => {
@@ -182,12 +186,27 @@ export default function Home() {
           </div>
         )}
 
+        <MyTeamCard
+          myTeam={myTeam}
+          myPit={myTeam != null ? pitByTeam.get(myTeam) ?? null : null}
+          onSet={setMyTeam}
+          onJump={jumpToPit}
+        />
+
         <FavoritesList
           favorites={favorites}
           pitByTeam={pitByTeam}
           onToggle={toggle}
           onJump={jumpToPit}
           onClear={clear}
+        />
+
+        <RoutePlanner
+          pits={pits}
+          myTeam={myTeam}
+          routes={routes}
+          onPlan={setRoutes}
+          onJumpToStop={jumpToPit}
         />
 
         <LocationPanel />
@@ -260,6 +279,8 @@ export default function Home() {
                 highlightedTeam={highlightedTeam}
                 favorites={favorites}
                 size={size}
+                myTeam={myTeam}
+                route={routes.find((r) => r.sideId === s.id)?.plan ?? null}
                 onPitClick={(pit) => {
                   if (pit.team !== null) {
                     setQuery(String(pit.team));
