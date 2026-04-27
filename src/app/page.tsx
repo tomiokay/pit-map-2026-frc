@@ -13,6 +13,7 @@ import { Legend } from "@/components/Legend";
 import { LocationPanel } from "@/components/LocationPanel";
 import { MyTeamCard } from "@/components/MyTeamCard";
 import { RoutePlanner, type PlannedSideRoute } from "@/components/RoutePlanner";
+import { TbaQueueWatcher } from "@/components/TbaQueueWatcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function Home() {
@@ -25,6 +26,7 @@ export default function Home() {
   const [highlightedTeam, setHighlightedTeam] = useState<number | null>(null);
   const [routes, setRoutes] = useState<PlannedSideRoute[]>([]);
   const [activeLeg, setActiveLeg] = useState<number | null>(null);
+  const [queueingTeams, setQueueingTeams] = useState<number[]>([]);
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const pitByTeam = useMemo(() => {
@@ -208,9 +210,12 @@ export default function Home() {
           routes={routes}
           activeLeg={activeLeg}
           setActiveLeg={setActiveLeg}
+          autoAvoidTeams={queueingTeams}
           onPlan={setRoutes}
           onJumpToStop={jumpToPit}
         />
+
+        <TbaQueueWatcher onQueueingChange={setQueueingTeams} />
 
         <LocationPanel />
 

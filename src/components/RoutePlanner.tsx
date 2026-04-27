@@ -30,6 +30,9 @@ interface Props {
   /** Lifted state so SideMap can dim non-active legs. */
   activeLeg?: number | null;
   setActiveLeg?: (leg: number | null) => void;
+  /** Teams the TBA watcher reports as queueing. Always treated as avoid,
+   *  on top of whatever the user manually typed. */
+  autoAvoidTeams?: number[];
 }
 
 const APPROX_FT_PER_CELL = 7; // each grid cell ≈ 7 ft (pit + half aisle)
@@ -45,6 +48,7 @@ export function RoutePlanner({
   routes,
   activeLeg: activeLegProp,
   setActiveLeg: setActiveLegProp,
+  autoAvoidTeams = [],
 }: Props) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -79,7 +83,12 @@ export function RoutePlanner({
   };
 
   const requestedTeams = useMemo(() => parseTeams(text), [text]);
-  const avoidTeams = useMemo(() => parseTeams(avoidText), [avoidText]);
+  const manualAvoidTeams = useMemo(() => parseTeams(avoidText), [avoidText]);
+  // Combined avoid list: manual + auto (TBA queueing).
+  const avoidTeams = useMemo(
+    () => [...new Set([...manualAvoidTeams, ...autoAvoidTeams])],
+    [manualAvoidTeams, autoAvoidTeams]
+  );
   const doneSet = useMemo(() => new Set(doneTeams), [doneTeams]);
   // The list that actually gets routed: requested minus avoid minus done.
   const activeTeams = useMemo(
@@ -302,6 +311,19 @@ export function RoutePlanner({
     if (!hydrated || !restoredRef.current) return;
     saveDraft({ text, returnHome, avoidText, doneTeams });
   }, [text, returnHome, avoidText, doneTeams, hydrated, saveDraft]);
+
+  // When the TBA-driven auto-avoid set changes, replan in place so the
+  // currently-displayed route reflects who's queueing now.
+  const lastAutoAvoidRef = useRef("");
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    if (routes.length === 0) return;
+    const sig = autoAvoidTeams.slice().sort().join(",");
+    if (sig === lastAutoAvoidRef.current) return;
+    lastAutoAvoidRef.current = sig;
+    onPlan(computePlans(activeTeams, returnHome));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAvoidTeams]);
 
   const handleSave = () => {
     if (recognized.length === 0) return;
