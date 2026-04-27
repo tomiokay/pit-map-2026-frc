@@ -414,33 +414,40 @@ export function RoutePlanner({
                 const div = DIVISION_BY_ID[r.pit.division];
                 const isQueueing = avoidTeams.includes(r.team);
                 const isDone = doneSet.has(r.team);
+                const Tag = isDone ? "button" : "span";
                 return (
-                  <span
+                  <Tag
                     key={r.team}
+                    onClick={isDone ? () => undoDone(r.team) : undefined}
                     className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border tabular-nums ${
                       isQueueing
                         ? "bg-rose-950/30 border-rose-900/60 text-rose-300 line-through"
                         : isDone
-                        ? "bg-emerald-950/30 border-emerald-900/60 text-emerald-300 line-through"
+                        ? "bg-emerald-950/30 border-emerald-900/60 text-emerald-300 line-through hover:bg-emerald-900/40 cursor-pointer"
                         : "bg-neutral-900 border-neutral-700"
                     }`}
                     title={
                       isQueueing
                         ? "Currently queueing — auto-skipped"
                         : isDone
-                        ? "Marked done"
+                        ? "Marked done — click to put back in route"
                         : undefined
                     }
                   >
                     <span className={`w-1.5 h-1.5 rounded-full ${div.swatch}`} />
                     {r.team}
                     <span className="text-neutral-500">· {r.pit.id}</span>
+                    {isDone && (
+                      <span className="text-emerald-300 font-bold" aria-hidden>
+                        ↺
+                      </span>
+                    )}
                     {isQueueing && (
                       <span className="text-rose-400" aria-hidden>
                         🚦
                       </span>
                     )}
-                  </span>
+                  </Tag>
                 );
               })}
             </div>
