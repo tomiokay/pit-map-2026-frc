@@ -27,6 +27,9 @@ interface Props {
   onPlan: (routes: PlannedSideRoute[]) => void;
   onJumpToStop: (pit: Pit) => void;
   routes: PlannedSideRoute[];
+  /** Lifted state so SideMap can dim non-active legs. */
+  activeLeg?: number | null;
+  setActiveLeg?: (leg: number | null) => void;
 }
 
 const APPROX_FT_PER_CELL = 7; // each grid cell ≈ 7 ft (pit + half aisle)
@@ -34,10 +37,24 @@ const APPROX_FT_PER_MIN = 280; // ≈ 3.2 mph
 const INTER_HALL_FT = 1100;   // rough walk through GRB concourse + admin row
 const INTER_HALL_MIN = INTER_HALL_FT / APPROX_FT_PER_MIN;
 
-export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Props) {
+export function RoutePlanner({
+  pits,
+  myTeam,
+  onPlan,
+  onJumpToStop,
+  routes,
+  activeLeg: activeLegProp,
+  setActiveLeg: setActiveLegProp,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [returnHome, setReturnHome] = useState(true);
+  const [avoidText, setAvoidText] = useState("");
+  const [doneTeams, setDoneTeams] = useState<number[]>([]);
+  const [activeLegLocal, setActiveLegLocal] = useState<number | null>(null);
+  const activeLeg = activeLegProp ?? activeLegLocal;
+  const setActiveLeg = setActiveLegProp ?? setActiveLegLocal;
+  const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [saveDraftName, setSaveDraftName] = useState("");
   const [showSaveInput, setShowSaveInput] = useState(false);
   const { savedRoutes, saveRoute, deleteRoute } = useSavedRoutes();
@@ -50,16 +67,26 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
     return m;
   }, [pits]);
 
-  const requestedTeams = useMemo(() => {
+  const parseTeams = (raw: string): number[] => {
     const out: number[] = [];
-    for (const tok of text.split(/[\s,]+/)) {
+    for (const tok of raw.split(/[\s,]+/)) {
       const t = tok.trim();
       if (!t) continue;
       const n = Number(t);
       if (Number.isFinite(n) && n > 0 && !out.includes(n)) out.push(n);
     }
     return out;
-  }, [text]);
+  };
+
+  const requestedTeams = useMemo(() => parseTeams(text), [text]);
+  const avoidTeams = useMemo(() => parseTeams(avoidText), [avoidText]);
+  const doneSet = useMemo(() => new Set(doneTeams), [doneTeams]);
+  // The list that actually gets routed: requested minus avoid minus done.
+  const activeTeams = useMemo(
+    () =>
+      requestedTeams.filter((t) => !avoidTeams.includes(t) && !doneSet.has(t)),
+    [requestedTeams, avoidTeams, doneSet]
+  );
 
   const recognized = requestedTeams
     .map((t) => ({ team: t, pit: pitByTeam.get(t) ?? null }))
@@ -150,52 +177,131 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
   };
 
   const handlePlan = () => {
-    onPlan(computePlans(recognized.map((r) => r.team), returnHome));
+    setActiveLeg(null);
+    onPlan(computePlans(activeTeams, returnHome));
   };
 
   const handleClear = () => {
     setText("");
+    setAvoidText("");
+    setDoneTeams([]);
+    setActiveLeg(null);
     onPlan([]);
     setShowSaveInput(false);
     setSaveDraftName("");
-    saveDraft({ text: "", returnHome });
+    saveDraft({ text: "", returnHome, avoidText: "", doneTeams: [] });
+  };
+
+  const markDone = (team: number) => {
+    if (doneSet.has(team)) return;
+    const nextDone = [...doneTeams, team];
+    setDoneTeams(nextDone);
+    // Re-plan immediately with this team excluded so the polyline updates.
+    const nextActive = activeTeams.filter((t) => t !== team);
+    setActiveLeg(null);
+    onPlan(computePlans(nextActive, returnHome));
+  };
+
+  const undoDone = (team: number) => {
+    setDoneTeams(doneTeams.filter((t) => t !== team));
+    // Re-plan to bring it back into the route.
+    const nextActive = [...activeTeams, team].filter(
+      (t) => !avoidTeams.includes(t)
+    );
+    setActiveLeg(null);
+    onPlan(computePlans(nextActive, returnHome));
+  };
+
+  const handleShare = async () => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("route");
+    url.searchParams.delete("return");
+    url.searchParams.delete("avoid");
+    if (requestedTeams.length > 0) url.searchParams.set("route", requestedTeams.join(","));
+    if (!returnHome) url.searchParams.set("return", "0");
+    if (avoidTeams.length > 0) url.searchParams.set("avoid", avoidTeams.join(","));
+    const link = url.toString();
+    const navAny = navigator as Navigator & {
+      share?: (data: { title?: string; url?: string; text?: string }) => Promise<void>;
+    };
+    try {
+      if (navAny.share) {
+        await navAny.share({ title: "FRC Pit Route", url: link });
+        setShareMessage("Shared!");
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(link);
+        setShareMessage("Link copied to clipboard");
+      } else {
+        setShareMessage(link);
+      }
+    } catch {
+      setShareMessage("Couldn’t share. Copy manually: " + link);
+    }
+    window.setTimeout(() => setShareMessage(null), 4000);
   };
 
   // Restore the in-progress draft on mount (once `useCurrentRouteDraft` has
-  // read from localStorage). The replan happens after `myTeam` + `pits` are
-  // available so `computePlans` can resolve teams to pit positions.
+  // read from localStorage). URL query params override the draft so a
+  // shared link can hand off a route to someone else.
   useEffect(() => {
     if (!hydrated) return;
     if (restoredRef.current) return;
-    setText(draft.text);
-    setReturnHome(draft.returnHome);
+    let nextText = draft.text;
+    let nextReturn = draft.returnHome;
+    let nextAvoid = draft.avoidText;
+    let nextDone = draft.doneTeams;
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const routeParam = params.get("route");
+      if (routeParam) {
+        nextText = routeParam.split(",").join(", ");
+        nextReturn = params.get("return") !== "0";
+        nextAvoid = params.get("avoid")?.split(",").join(", ") ?? "";
+        nextDone = [];
+        // Drop the params after consuming so refresh doesn't re-import.
+        params.delete("route");
+        params.delete("return");
+        params.delete("avoid");
+        const newSearch = params.toString();
+        const newUrl =
+          window.location.pathname +
+          (newSearch ? `?${newSearch}` : "") +
+          window.location.hash;
+        window.history.replaceState({}, "", newUrl);
+      }
+    }
+    setText(nextText);
+    setReturnHome(nextReturn);
+    setAvoidText(nextAvoid);
+    setDoneTeams(nextDone);
     restoredRef.current = true;
-  }, [hydrated, draft.text, draft.returnHome]);
+  }, [hydrated, draft.text, draft.returnHome, draft.avoidText, draft.doneTeams]);
 
   // Once everything is hydrated AND the user has both a team set and pits
   // loaded, replay the saved draft so the polylines come back automatically.
   useEffect(() => {
     if (!restoredRef.current) return;
     if (myTeam == null) return;
-    if (!draft.text.trim()) return;
-    const teams: number[] = [];
-    for (const tok of draft.text.split(/[\s,]+/)) {
-      const n = Number(tok.trim());
-      if (Number.isFinite(n) && n > 0 && !teams.includes(n)) teams.push(n);
-    }
-    if (teams.length === 0) return;
-    onPlan(computePlans(teams, draft.returnHome));
+    if (!text.trim()) return;
+    const teams = parseTeams(text);
+    const avoid = parseTeams(avoidText);
+    const filtered = teams.filter(
+      (t) => !avoid.includes(t) && !doneSet.has(t)
+    );
+    if (filtered.length === 0) return;
+    onPlan(computePlans(filtered, returnHome));
     // We intentionally only run this once per draft restore — subsequent
     // edits go through handlePlan instead.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restoredRef.current, myTeam, pits.length]);
 
-  // Persist draft whenever the text or returnHome flag changes (skip the
-  // pre-hydration phase so we don't clobber the stored draft with empty).
+  // Persist draft whenever any tracked field changes (skip pre-hydration so
+  // we don't clobber the stored draft with the initial empty state).
   useEffect(() => {
     if (!hydrated || !restoredRef.current) return;
-    saveDraft({ text, returnHome });
-  }, [text, returnHome, hydrated, saveDraft]);
+    saveDraft({ text, returnHome, avoidText, doneTeams });
+  }, [text, returnHome, avoidText, doneTeams, hydrated, saveDraft]);
 
   const handleSave = () => {
     if (recognized.length === 0) return;
@@ -208,6 +314,8 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
   const loadSavedRoute = (route: SavedRoute) => {
     setText(route.teams.join(", "));
     setReturnHome(route.returnHome);
+    setDoneTeams([]);
+    setActiveLeg(null);
     onPlan(computePlans(route.teams, route.returnHome));
   };
 
@@ -291,10 +399,18 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
             <div className="flex flex-wrap gap-1.5">
               {recognized.map((r) => {
                 const div = DIVISION_BY_ID[r.pit.division];
+                const isAvoided = avoidTeams.includes(r.team);
+                const isDone = doneSet.has(r.team);
                 return (
                   <span
                     key={r.team}
-                    className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-neutral-900 border border-neutral-700 tabular-nums"
+                    className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border tabular-nums ${
+                      isAvoided
+                        ? "bg-rose-950/30 border-rose-900/60 text-rose-300 line-through"
+                        : isDone
+                        ? "bg-emerald-950/30 border-emerald-900/60 text-emerald-300 line-through"
+                        : "bg-neutral-900 border-neutral-700"
+                    }`}
                   >
                     <span className={`w-1.5 h-1.5 rounded-full ${div.swatch}`} />
                     {r.team}
@@ -309,6 +425,23 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
               Not in dataset: {missing.join(", ")}
             </p>
           )}
+          <details className="text-xs text-neutral-400">
+            <summary className="cursor-pointer hover:text-neutral-200">
+              Avoid teams (e.g. queueing — won’t be routed)
+              {avoidTeams.length > 0 && (
+                <span className="ml-2 text-rose-300">
+                  · {avoidTeams.length} avoided
+                </span>
+              )}
+            </summary>
+            <textarea
+              value={avoidText}
+              onChange={(e) => setAvoidText(e.target.value)}
+              rows={2}
+              placeholder="111, 254, …"
+              className="mt-1 w-full rounded-lg bg-neutral-950 border border-neutral-800 focus:border-rose-400 focus:ring-1 focus:ring-rose-400/40 outline-none px-3 py-2 font-mono text-sm text-neutral-200"
+            />
+          </details>
           <label className="flex items-center gap-2 text-xs text-neutral-300">
             <input
               type="checkbox"
@@ -340,7 +473,18 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
                 Save…
               </button>
             )}
+            {recognized.length > 0 && (
+              <button
+                onClick={handleShare}
+                className="text-sm px-3 py-1.5 rounded-md bg-sky-500 text-neutral-950 font-semibold hover:bg-sky-400"
+              >
+                Share
+              </button>
+            )}
           </div>
+          {shareMessage && (
+            <p className="text-[11px] text-sky-300">{shareMessage}</p>
+          )}
           {showSaveInput && (
             <div className="flex gap-2 items-center">
               <input
@@ -404,10 +548,6 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
                     }
 
                     plan.stops.forEach((stop, idx) => {
-                      // The plan duplicates home as both first and last when
-                      // returnHome is on. Skip the duplicate "first" home in
-                      // the second render (we'll surface a final return entry
-                      // outside this loop instead).
                       const isPlanHome =
                         idx === 0 ||
                         (idx === plan.stops.length - 1 &&
@@ -420,11 +560,26 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
                           ? "S"
                           : "E"
                         : String(globalIdx);
+                      // Map this stop to a leg-index so clicking it can
+                      // highlight the corresponding polyline segment. Leg i
+                      // ends at stop i (legs are 1-indexed by stop, since
+                      // stop 0 is home).
+                      const legIdx = idx === 0 ? null : idx - 1;
+                      const isActive = legIdx != null && activeLeg === legIdx && /* same hall */ true;
                       items.push(
                         <li
                           key={`${sideId}-${idx}`}
-                          onClick={() => onJumpToStop(stop.pit)}
-                          className="flex items-center gap-2 text-xs px-2 py-1 rounded-md hover:bg-neutral-900 cursor-pointer"
+                          onClick={() => {
+                            if (legIdx != null) {
+                              setActiveLeg(activeLeg === legIdx ? null : legIdx);
+                            }
+                            onJumpToStop(stop.pit);
+                          }}
+                          className={`flex items-center gap-2 text-xs px-2 py-1 rounded-md cursor-pointer ${
+                            isActive
+                              ? "bg-amber-500/15 ring-1 ring-amber-400"
+                              : "hover:bg-neutral-900"
+                          }`}
                         >
                           <span
                             className={`w-5 h-5 grid place-items-center rounded-full text-[10px] font-bold ${
@@ -445,6 +600,18 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
                           <span className="text-neutral-500 truncate flex-1">
                             {div.name}
                           </span>
+                          {!isPlanHome && stop.pit.team !== null && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                markDone(stop.pit.team!);
+                              }}
+                              className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500 hover:text-neutral-950 font-bold"
+                              title="Mark this stop done — removes it from the route"
+                            >
+                              ✓ done
+                            </button>
+                          )}
                         </li>
                       );
                     });
@@ -457,6 +624,40 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
                   Couldn’t route to some pits — they may be on a different
                   side or completely walled in.
                 </p>
+              )}
+              {doneTeams.length > 0 && (
+                <div className="pt-2 border-t border-neutral-800/60">
+                  <div className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">
+                    Marked done · {doneTeams.length}
+                  </div>
+                  <ul className="flex flex-wrap gap-1.5">
+                    {doneTeams.map((t) => {
+                      const pit = pitByTeam.get(t);
+                      const div = pit ? DIVISION_BY_ID[pit.division] : null;
+                      return (
+                        <li
+                          key={t}
+                          className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-950/30 border border-emerald-900/40 text-emerald-300 line-through tabular-nums"
+                        >
+                          {div && (
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${div.swatch}`}
+                            />
+                          )}
+                          {t}
+                          <button
+                            onClick={() => undoDone(t)}
+                            aria-label={`Undo done for team ${t}`}
+                            title="Undo — put this stop back in the route"
+                            className="text-emerald-400 hover:text-emerald-200 leading-none ml-1"
+                          >
+                            ↺
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
               )}
             </div>
           )}

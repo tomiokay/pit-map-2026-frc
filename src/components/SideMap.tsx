@@ -20,6 +20,8 @@ interface Props {
   size?: MapSize;
   myTeam?: number | null;
   route?: RoutePlan | null;
+  activeLeg?: number | null;
+  doneTeams?: number[];
   onPitClick?: (pit: Pit) => void;
 }
 
@@ -38,9 +40,12 @@ export function SideMap({
   size = "M",
   myTeam,
   route,
+  activeLeg,
+  doneTeams,
   onPitClick,
 }: Props) {
   const dims = SIZE_PX[size];
+  const doneSet = new Set(doneTeams ?? []);
   const placed: PlacedPit[] = side.placements.flatMap((placement) => {
     return pits
       .filter((p) => p.division === placement.id)
@@ -97,7 +102,7 @@ export function SideMap({
   });
   // Build one polyline per "leg" between consecutive stops, each tinted a
   // different colour so overlapping segments stay readable.
-  type Leg = { id: string; points: string; stroke: string };
+  type Leg = { id: string; points: string; stroke: string; legIndex: number };
   const legs: Leg[] = [];
   if (route && route.stops.length > 1) {
     const legPalette = [
@@ -131,6 +136,7 @@ export function SideMap({
         .join(" ");
       legs.push({
         id: `leg-${i}`,
+        legIndex: i - 1,
         points,
         stroke: legPalette[(i - 1) % legPalette.length],
       });
@@ -195,11 +201,20 @@ export function SideMap({
                 strokeWidth={Math.max(2.5, dims.cell * 0.08)}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeOpacity={0.85}
+                strokeOpacity={
+                  activeLeg == null
+                    ? 0.85
+                    : activeLeg === leg.legIndex
+                    ? 1
+                    : 0.15
+                }
                 markerEnd={`url(#arrow-${side.id}-${leg.id})`}
                 style={{
                   mixBlendMode: "screen",
-                  filter: `drop-shadow(0 0 3px ${leg.stroke})`,
+                  filter:
+                    activeLeg == null || activeLeg === leg.legIndex
+                      ? `drop-shadow(0 0 3px ${leg.stroke})`
+                      : "none",
                 }}
               />
             ))}

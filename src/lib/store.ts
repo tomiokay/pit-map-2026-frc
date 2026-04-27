@@ -124,25 +124,33 @@ export function useSavedRoutes(): {
 export interface CurrentRouteDraft {
   text: string;
   returnHome: boolean;
+  avoidText: string;
+  doneTeams: number[];
 }
+
+const EMPTY_DRAFT: CurrentRouteDraft = {
+  text: "",
+  returnHome: true,
+  avoidText: "",
+  doneTeams: [],
+};
 
 export function useCurrentRouteDraft(): {
   draft: CurrentRouteDraft;
   hydrated: boolean;
   saveDraft: (next: CurrentRouteDraft) => void;
 } {
-  const [draft, setDraft] = useState<CurrentRouteDraft>({
-    text: "",
-    returnHome: true,
-  });
+  const [draft, setDraft] = useState<CurrentRouteDraft>(EMPTY_DRAFT);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    const stored = readJSON<CurrentRouteDraft | null>(CURRENT_ROUTE_KEY, null);
+    const stored = readJSON<Partial<CurrentRouteDraft> | null>(CURRENT_ROUTE_KEY, null);
     if (stored && typeof stored === "object") {
       setDraft({
         text: stored.text ?? "",
         returnHome: stored.returnHome ?? true,
+        avoidText: stored.avoidText ?? "",
+        doneTeams: Array.isArray(stored.doneTeams) ? stored.doneTeams : [],
       });
     }
     setHydrated(true);

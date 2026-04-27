@@ -24,6 +24,7 @@ export default function Home() {
   const [activeSide, setActiveSide] = useState<string>("left");
   const [highlightedTeam, setHighlightedTeam] = useState<number | null>(null);
   const [routes, setRoutes] = useState<PlannedSideRoute[]>([]);
+  const [activeLeg, setActiveLeg] = useState<number | null>(null);
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const pitByTeam = useMemo(() => {
@@ -205,6 +206,8 @@ export default function Home() {
           pits={pits}
           myTeam={myTeam}
           routes={routes}
+          activeLeg={activeLeg}
+          setActiveLeg={setActiveLeg}
           onPlan={setRoutes}
           onJumpToStop={jumpToPit}
         />
@@ -281,6 +284,7 @@ export default function Home() {
                 size={size}
                 myTeam={myTeam}
                 route={routes.find((r) => r.sideId === s.id)?.plan ?? null}
+                activeLeg={activeLeg}
                 onPitClick={(pit) => {
                   if (pit.team !== null) {
                     setQuery(String(pit.team));
