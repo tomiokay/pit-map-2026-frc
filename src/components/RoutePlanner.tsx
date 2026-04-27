@@ -53,7 +53,7 @@ export function RoutePlanner({
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [returnHome, setReturnHome] = useState(true);
-  const [avoidText, setAvoidText] = useState("");
+  const [skipQueueing, setSkipQueueing] = useState(true);
   const [doneTeams, setDoneTeams] = useState<number[]>([]);
   const [activeLegLocal, setActiveLegLocal] = useState<number | null>(null);
   const activeLeg = activeLegProp ?? activeLegLocal;
@@ -83,11 +83,10 @@ export function RoutePlanner({
   };
 
   const requestedTeams = useMemo(() => parseTeams(text), [text]);
-  const manualAvoidTeams = useMemo(() => parseTeams(avoidText), [avoidText]);
-  // Combined avoid list: manual + auto (TBA queueing).
+  // Avoid set is the TBA queueing list, gated on the user's preference.
   const avoidTeams = useMemo(
-    () => [...new Set([...manualAvoidTeams, ...autoAvoidTeams])],
-    [manualAvoidTeams, autoAvoidTeams]
+    () => (skipQueueing ? [...new Set(autoAvoidTeams)] : []),
+    [autoAvoidTeams, skipQueueing]
   );
   const doneSet = useMemo(() => new Set(doneTeams), [doneTeams]);
   // The list that actually gets routed: requested minus avoid minus done.
@@ -192,7 +191,6 @@ export function RoutePlanner({
 
   const handleClear = () => {
     setText("");
-    setAvoidText("");
     setDoneTeams([]);
     setActiveLeg(null);
     onPlan([]);
@@ -226,10 +224,8 @@ export function RoutePlanner({
     const url = new URL(window.location.href);
     url.searchParams.delete("route");
     url.searchParams.delete("return");
-    url.searchParams.delete("avoid");
     if (requestedTeams.length > 0) url.searchParams.set("route", requestedTeams.join(","));
     if (!returnHome) url.searchParams.set("return", "0");
-    if (avoidTeams.length > 0) url.searchParams.set("avoid", avoidTeams.join(","));
     const link = url.toString();
     const navAny = navigator as Navigator & {
       share?: (data: { title?: string; url?: string; text?: string }) => Promise<void>;
@@ -258,7 +254,6 @@ export function RoutePlanner({
     if (restoredRef.current) return;
     let nextText = draft.text;
     let nextReturn = draft.returnHome;
-    let nextAvoid = draft.avoidText;
     let nextDone = draft.doneTeams;
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -266,12 +261,9 @@ export function RoutePlanner({
       if (routeParam) {
         nextText = routeParam.split(",").join(", ");
         nextReturn = params.get("return") !== "0";
-        nextAvoid = params.get("avoid")?.split(",").join(", ") ?? "";
         nextDone = [];
-        // Drop the params after consuming so refresh doesn't re-import.
         params.delete("route");
         params.delete("return");
-        params.delete("avoid");
         const newSearch = params.toString();
         const newUrl =
           window.location.pathname +
@@ -282,10 +274,9 @@ export function RoutePlanner({
     }
     setText(nextText);
     setReturnHome(nextReturn);
-    setAvoidText(nextAvoid);
     setDoneTeams(nextDone);
     restoredRef.current = true;
-  }, [hydrated, draft.text, draft.returnHome, draft.avoidText, draft.doneTeams]);
+  }, [hydrated, draft.text, draft.returnHome, draft.doneTeams]);
 
   // Once everything is hydrated AND the user has both a team set and pits
   // loaded, replay the saved draft so the polylines come back automatically.
@@ -294,9 +285,8 @@ export function RoutePlanner({
     if (myTeam == null) return;
     if (!text.trim()) return;
     const teams = parseTeams(text);
-    const avoid = parseTeams(avoidText);
     const filtered = teams.filter(
-      (t) => !avoid.includes(t) && !doneSet.has(t)
+      (t) => !avoidTeams.includes(t) && !doneSet.has(t)
     );
     if (filtered.length === 0) return;
     onPlan(computePlans(filtered, returnHome));
@@ -309,21 +299,22 @@ export function RoutePlanner({
   // we don't clobber the stored draft with the initial empty state).
   useEffect(() => {
     if (!hydrated || !restoredRef.current) return;
-    saveDraft({ text, returnHome, avoidText, doneTeams });
-  }, [text, returnHome, avoidText, doneTeams, hydrated, saveDraft]);
+    saveDraft({ text, returnHome, avoidText: "", doneTeams });
+  }, [text, returnHome, doneTeams, hydrated, saveDraft]);
 
-  // When the TBA-driven auto-avoid set changes, replan in place so the
-  // currently-displayed route reflects who's queueing now.
-  const lastAutoAvoidRef = useRef("");
+  // When the effective avoid set (TBA queueing × skipQueueing toggle)
+  // changes, replan in place so the visible route reflects who's queueing
+  // and whether the user wants to skip them.
+  const lastAvoidRef = useRef("");
   useEffect(() => {
     if (!restoredRef.current) return;
     if (routes.length === 0) return;
-    const sig = autoAvoidTeams.slice().sort().join(",");
-    if (sig === lastAutoAvoidRef.current) return;
-    lastAutoAvoidRef.current = sig;
+    const sig = avoidTeams.slice().sort().join(",");
+    if (sig === lastAvoidRef.current) return;
+    lastAvoidRef.current = sig;
     onPlan(computePlans(activeTeams, returnHome));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoAvoidTeams]);
+  }, [avoidTeams]);
 
   const handleSave = () => {
     if (recognized.length === 0) return;
@@ -421,22 +412,34 @@ export function RoutePlanner({
             <div className="flex flex-wrap gap-1.5">
               {recognized.map((r) => {
                 const div = DIVISION_BY_ID[r.pit.division];
-                const isAvoided = avoidTeams.includes(r.team);
+                const isQueueing = avoidTeams.includes(r.team);
                 const isDone = doneSet.has(r.team);
                 return (
                   <span
                     key={r.team}
                     className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border tabular-nums ${
-                      isAvoided
+                      isQueueing
                         ? "bg-rose-950/30 border-rose-900/60 text-rose-300 line-through"
                         : isDone
                         ? "bg-emerald-950/30 border-emerald-900/60 text-emerald-300 line-through"
                         : "bg-neutral-900 border-neutral-700"
                     }`}
+                    title={
+                      isQueueing
+                        ? "Currently queueing — auto-skipped"
+                        : isDone
+                        ? "Marked done"
+                        : undefined
+                    }
                   >
                     <span className={`w-1.5 h-1.5 rounded-full ${div.swatch}`} />
                     {r.team}
                     <span className="text-neutral-500">· {r.pit.id}</span>
+                    {isQueueing && (
+                      <span className="text-rose-400" aria-hidden>
+                        🚦
+                      </span>
+                    )}
                   </span>
                 );
               })}
@@ -447,23 +450,6 @@ export function RoutePlanner({
               Not in dataset: {missing.join(", ")}
             </p>
           )}
-          <details className="text-xs text-neutral-400">
-            <summary className="cursor-pointer hover:text-neutral-200">
-              Avoid teams (e.g. queueing — won’t be routed)
-              {avoidTeams.length > 0 && (
-                <span className="ml-2 text-rose-300">
-                  · {avoidTeams.length} avoided
-                </span>
-              )}
-            </summary>
-            <textarea
-              value={avoidText}
-              onChange={(e) => setAvoidText(e.target.value)}
-              rows={2}
-              placeholder="111, 254, …"
-              className="mt-1 w-full rounded-lg bg-neutral-950 border border-neutral-800 focus:border-rose-400 focus:ring-1 focus:ring-rose-400/40 outline-none px-3 py-2 font-mono text-sm text-neutral-200"
-            />
-          </details>
           <label className="flex items-center gap-2 text-xs text-neutral-300">
             <input
               type="checkbox"
@@ -472,6 +458,16 @@ export function RoutePlanner({
               className="accent-amber-400"
             />
             Return to my pit at the end
+          </label>
+          <label className="flex items-center gap-2 text-xs text-neutral-300">
+            <input
+              type="checkbox"
+              checked={skipQueueing}
+              onChange={(e) => setSkipQueueing(e.target.checked)}
+              className="accent-rose-400"
+            />
+            Skip teams that are queueing
+            <span className="text-neutral-500">(via TBA)</span>
           </label>
           <div className="flex flex-wrap items-center gap-2">
             <button
