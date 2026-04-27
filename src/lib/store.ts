@@ -10,6 +10,7 @@ const MY_PIT_KEY = "pit-map-my-pit-v1";
 const MAP_SIZE_KEY = "pit-map-size-v1";
 const MY_TEAM_KEY = "pit-map-my-team-v1";
 const SAVED_ROUTES_KEY = "pit-map-saved-routes-v1";
+const CURRENT_ROUTE_KEY = "pit-map-current-route-v1";
 
 export type MapSize = "XS" | "S" | "M" | "L";
 
@@ -118,6 +119,41 @@ export function useSavedRoutes(): {
   );
 
   return { savedRoutes, saveRoute, deleteRoute, renameRoute };
+}
+
+export interface CurrentRouteDraft {
+  text: string;
+  returnHome: boolean;
+}
+
+export function useCurrentRouteDraft(): {
+  draft: CurrentRouteDraft;
+  hydrated: boolean;
+  saveDraft: (next: CurrentRouteDraft) => void;
+} {
+  const [draft, setDraft] = useState<CurrentRouteDraft>({
+    text: "",
+    returnHome: true,
+  });
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    const stored = readJSON<CurrentRouteDraft | null>(CURRENT_ROUTE_KEY, null);
+    if (stored && typeof stored === "object") {
+      setDraft({
+        text: stored.text ?? "",
+        returnHome: stored.returnHome ?? true,
+      });
+    }
+    setHydrated(true);
+  }, []);
+
+  const saveDraft = useCallback((next: CurrentRouteDraft) => {
+    setDraft(next);
+    writeJSON(CURRENT_ROUTE_KEY, next);
+  }, []);
+
+  return { draft, hydrated, saveDraft };
 }
 
 function readJSON<T>(key: string, fallback: T): T {

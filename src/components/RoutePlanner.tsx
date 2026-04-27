@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Pit } from "@/lib/types";
 import { DIVISION_BY_ID } from "@/lib/divisions";
 import { SIDES, SIDE_BY_DIVISION } from "@/lib/sides";
@@ -10,7 +10,11 @@ import {
   planRoute,
   type RoutePlan,
 } from "@/lib/router";
-import { useSavedRoutes, type SavedRoute } from "@/lib/store";
+import {
+  useCurrentRouteDraft,
+  useSavedRoutes,
+  type SavedRoute,
+} from "@/lib/store";
 
 export interface PlannedSideRoute {
   sideId: string;
@@ -37,6 +41,8 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
   const [saveDraftName, setSaveDraftName] = useState("");
   const [showSaveInput, setShowSaveInput] = useState(false);
   const { savedRoutes, saveRoute, deleteRoute } = useSavedRoutes();
+  const { draft, hydrated, saveDraft } = useCurrentRouteDraft();
+  const restoredRef = useRef(false);
 
   const pitByTeam = useMemo(() => {
     const m = new Map<number, Pit>();
@@ -152,7 +158,44 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
     onPlan([]);
     setShowSaveInput(false);
     setSaveDraftName("");
+    saveDraft({ text: "", returnHome });
   };
+
+  // Restore the in-progress draft on mount (once `useCurrentRouteDraft` has
+  // read from localStorage). The replan happens after `myTeam` + `pits` are
+  // available so `computePlans` can resolve teams to pit positions.
+  useEffect(() => {
+    if (!hydrated) return;
+    if (restoredRef.current) return;
+    setText(draft.text);
+    setReturnHome(draft.returnHome);
+    restoredRef.current = true;
+  }, [hydrated, draft.text, draft.returnHome]);
+
+  // Once everything is hydrated AND the user has both a team set and pits
+  // loaded, replay the saved draft so the polylines come back automatically.
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    if (myTeam == null) return;
+    if (!draft.text.trim()) return;
+    const teams: number[] = [];
+    for (const tok of draft.text.split(/[\s,]+/)) {
+      const n = Number(tok.trim());
+      if (Number.isFinite(n) && n > 0 && !teams.includes(n)) teams.push(n);
+    }
+    if (teams.length === 0) return;
+    onPlan(computePlans(teams, draft.returnHome));
+    // We intentionally only run this once per draft restore — subsequent
+    // edits go through handlePlan instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoredRef.current, myTeam, pits.length]);
+
+  // Persist draft whenever the text or returnHome flag changes (skip the
+  // pre-hydration phase so we don't clobber the stored draft with empty).
+  useEffect(() => {
+    if (!hydrated || !restoredRef.current) return;
+    saveDraft({ text, returnHome });
+  }, [text, returnHome, hydrated, saveDraft]);
 
   const handleSave = () => {
     if (recognized.length === 0) return;
