@@ -90,18 +90,25 @@ export function RoutePlanner({ pits, myTeam, onPlan, onJumpToStop, routes }: Pro
       let anchor = homePlaced;
       let stopsList = visits;
       if (!homePlaced) {
-        // No home pit on this side. Pick the first visit as the entrance —
-        // that's where we'd walk in from the concourse.
-        anchor = visits[0];
-        stopsList = visits.slice(1);
+        // We're planning the other hall. The user enters from the concourse
+        // on the side closest to their home hall — left edge of Hall E if
+        // home is in Hall A, right edge of Hall A if home is in Hall E. So
+        // pick the visit nearest that edge as both entry and exit, and loop
+        // through the rest from there.
+        const sortByCol =
+          homeSideId === "left"
+            ? (a: typeof visits[0], b: typeof visits[0]) => a.gridCol - b.gridCol
+            : (a: typeof visits[0], b: typeof visits[0]) => b.gridCol - a.gridCol;
+        const sorted = [...visits].sort(sortByCol);
+        anchor = sorted[0];
+        stopsList = sorted.slice(1);
       }
       if (!anchor) continue;
 
-      // Only the home hall needs a "return to home" stop. Other halls
-      // simply end at their last visit; the user walks back to the home
-      // hall via the concourse, where the home hall's return-to-home
-      // segment kicks in.
-      const planReturn = returnHome && side.id === homeSideId;
+      // Home hall: respect the user's "return to my pit" toggle.
+      // Other hall: always loop back to the entry pit so the user can walk
+      // back through the concourse the way they came.
+      const planReturn = side.id === homeSideId ? returnHome : true;
       const plan = planRoute(anchor, stopsList, grid, { returnHome: planReturn });
       plans.push({ sideId: side.id, plan });
     }
