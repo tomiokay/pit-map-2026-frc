@@ -9,6 +9,7 @@ import { TeamResult } from "@/components/TeamResult";
 import { FavoritesList } from "@/components/FavoritesList";
 import { SideMap } from "@/components/SideMap";
 import { Legend } from "@/components/Legend";
+import { SiteLoadCounter } from "@/components/SiteLoadCounter";
 import { LocationPanel } from "@/components/LocationPanel";
 import { MyTeamCard } from "@/components/MyTeamCard";
 import { RoutePlanner, type PlannedSideRoute } from "@/components/RoutePlanner";
@@ -308,6 +309,7 @@ export default function Home() {
           <p className="opacity-60">
             Favorites & routes are stored in your browser only.
           </p>
+          <SiteLoadCounter />
           <p className="pt-3 text-neutral-500">
             Made by{" "}
             <span className="text-neutral-300 font-semibold">Athan Wang</span>{" "}
