@@ -10,20 +10,18 @@ const NAMESPACE = "houston-pit-map";
 const COUNTER = "loads";
 
 interface CounterResponse {
-  code: number;
-  message?: string;
-  data?: { up_count?: number; count?: number };
+  count?: number;
 }
 
 async function readCount(): Promise<number | null> {
   try {
     const r = await fetch(
-      `https://api.counterapi.dev/v1/${NAMESPACE}/${COUNTER}`,
+      `https://api.counterapi.dev/v1/${NAMESPACE}/${COUNTER}/`,
       { cache: "no-store" }
     );
     if (!r.ok) return null;
     const j = (await r.json()) as CounterResponse;
-    return j.data?.count ?? j.data?.up_count ?? null;
+    return j.count ?? null;
   } catch {
     return null;
   }
@@ -32,12 +30,12 @@ async function readCount(): Promise<number | null> {
 async function incrementCount(): Promise<number | null> {
   try {
     const r = await fetch(
-      `https://api.counterapi.dev/v1/${NAMESPACE}/${COUNTER}/up`,
+      `https://api.counterapi.dev/v1/${NAMESPACE}/${COUNTER}/up/`,
       { cache: "no-store" }
     );
     if (!r.ok) return null;
     const j = (await r.json()) as CounterResponse;
-    return j.data?.count ?? j.data?.up_count ?? null;
+    return j.count ?? null;
   } catch {
     return null;
   }
