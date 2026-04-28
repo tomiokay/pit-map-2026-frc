@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Pit } from "@/lib/types";
+import type { DivisionId, Pit } from "@/lib/types";
 import { DIVISION_BY_ID } from "@/lib/divisions";
 import { SIDES, SIDE_BY_DIVISION } from "@/lib/sides";
 import {
@@ -33,6 +33,9 @@ interface Props {
   /** Teams the TBA watcher reports as queueing. Always treated as avoid,
    *  on top of whatever the user manually typed. */
   autoAvoidTeams?: number[];
+  /** When set, only route teams in this division. Out-of-scope teams are
+   *  detected from the full `pits` prop and surfaced in a banner. */
+  scopeDivision?: DivisionId | null;
 }
 
 const APPROX_FT_PER_CELL = 7; // each grid cell ≈ 7 ft (pit + half aisle)
@@ -49,6 +52,7 @@ export function RoutePlanner({
   activeLeg: activeLegProp,
   setActiveLeg: setActiveLegProp,
   autoAvoidTeams = [],
+  scopeDivision = null,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -89,16 +93,30 @@ export function RoutePlanner({
     [autoAvoidTeams, skipQueueing]
   );
   const doneSet = useMemo(() => new Set(doneTeams), [doneTeams]);
-  // The list that actually gets routed: requested minus avoid minus done.
+  // The list that actually gets routed: requested minus avoid minus done,
+  // and minus any teams outside the scoped division (if scope is set).
   const activeTeams = useMemo(
     () =>
-      requestedTeams.filter((t) => !avoidTeams.includes(t) && !doneSet.has(t)),
-    [requestedTeams, avoidTeams, doneSet]
+      requestedTeams.filter((t) => {
+        if (avoidTeams.includes(t) || doneSet.has(t)) return false;
+        if (scopeDivision) {
+          const p = pitByTeam.get(t);
+          if (!p || p.division !== scopeDivision) return false;
+        }
+        return true;
+      }),
+    [requestedTeams, avoidTeams, doneSet, scopeDivision, pitByTeam]
   );
 
-  const recognized = requestedTeams
+  const allRecognized = requestedTeams
     .map((t) => ({ team: t, pit: pitByTeam.get(t) ?? null }))
     .filter((r): r is { team: number; pit: Pit } => r.pit !== null);
+  const recognized = scopeDivision
+    ? allRecognized.filter((r) => r.pit.division === scopeDivision)
+    : allRecognized;
+  const outsideScopeRecognized = scopeDivision
+    ? allRecognized.filter((r) => r.pit.division !== scopeDivision)
+    : [];
   const missing = requestedTeams.filter((t) => !pitByTeam.has(t));
 
   const computePlans = (
@@ -455,6 +473,17 @@ export function RoutePlanner({
           {missing.length > 0 && (
             <p className="text-[11px] text-rose-300">
               Not in dataset: {missing.join(", ")}
+            </p>
+          )}
+          {outsideScopeRecognized.length > 0 && scopeDivision && (
+            <p className="text-[11px] text-amber-300/90 bg-amber-950/30 border border-amber-900/40 rounded-md px-2 py-1.5">
+              {outsideScopeRecognized.length}{" "}
+              {outsideScopeRecognized.length === 1 ? "team is" : "teams are"}{" "}
+              outside <strong>{DIVISION_BY_ID[scopeDivision].name}</strong> and
+              were skipped from the route:{" "}
+              <span className="text-neutral-300 tabular-nums">
+                {outsideScopeRecognized.map((r) => r.team).join(", ")}
+              </span>
             </p>
           )}
           <label className="flex items-center gap-2 text-xs text-neutral-300">

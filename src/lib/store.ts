@@ -18,7 +18,7 @@ export function useMapSize(): {
   size: MapSize;
   setSize: (s: MapSize) => void;
 } {
-  const [size, setSizeState] = useState<MapSize>("M");
+  const [size, setSizeState] = useState<MapSize>("XS");
   useEffect(() => {
     const stored = readJSON<MapSize | null>(MAP_SIZE_KEY, null);
     if (stored && ["XS", "S", "M", "L"].includes(stored)) setSizeState(stored);

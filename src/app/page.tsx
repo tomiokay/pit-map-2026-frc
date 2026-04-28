@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFavorites, useMapSize, useMyTeam, usePits } from "@/lib/store";
-import type { Pit } from "@/lib/types";
-import { SIDES, SIDE_BY_DIVISION } from "@/lib/sides";
+import type { DivisionId, Pit } from "@/lib/types";
+import { DIVISIONS, DIVISION_BY_ID } from "@/lib/divisions";
+import { SIDES, SIDE_BY_DIVISION, type SideConfig } from "@/lib/sides";
+import { EVENT_KEY_BY_DIVISION } from "@/lib/tba";
 import { SearchBar } from "@/components/SearchBar";
 import { TeamResult } from "@/components/TeamResult";
 import { FavoritesList } from "@/components/FavoritesList";
@@ -16,6 +18,8 @@ import { RoutePlanner, type PlannedSideRoute } from "@/components/RoutePlanner";
 import { TbaQueueWatcher } from "@/components/TbaQueueWatcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
+const SCOPE_KEY = "pit-map-scope-division-v1";
+
 export default function Home() {
   const { pits } = usePits();
   const { favorites, isFavorite, toggle, clear } = useFavorites();
@@ -27,19 +31,73 @@ export default function Home() {
   const [routes, setRoutes] = useState<PlannedSideRoute[]>([]);
   const [activeLeg, setActiveLeg] = useState<number | null>(null);
   const [queueingTeams, setQueueingTeams] = useState<number[]>([]);
+  const [scopeDivision, setScopeDivision] = useState<DivisionId | null>(null);
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  const pitByTeam = useMemo(() => {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(SCOPE_KEY) as DivisionId | null;
+    if (stored && DIVISION_BY_ID[stored]) setScopeDivision(stored);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (scopeDivision) window.localStorage.setItem(SCOPE_KEY, scopeDivision);
+    else window.localStorage.removeItem(SCOPE_KEY);
+  }, [scopeDivision]);
+
+  const fullPitByTeam = useMemo(() => {
     const m = new Map<number, Pit>();
     for (const p of pits) if (p.team !== null) m.set(p.team, p);
     return m;
   }, [pits]);
 
+  const scopedPits = useMemo(
+    () =>
+      scopeDivision ? pits.filter((p) => p.division === scopeDivision) : pits,
+    [pits, scopeDivision]
+  );
+
+  const pitByTeam = useMemo(() => {
+    const m = new Map<number, Pit>();
+    for (const p of scopedPits) if (p.team !== null) m.set(p.team, p);
+    return m;
+  }, [scopedPits]);
+
   const matches = useMemo(() => {
     const q = query.trim();
     if (!q) return [];
-    return pits.filter((p) => p.team !== null && String(p.team).startsWith(q));
-  }, [query, pits]);
+    return scopedPits.filter(
+      (p) => p.team !== null && String(p.team).startsWith(q)
+    );
+  }, [query, scopedPits]);
+
+  const myTeamPit = myTeam != null ? fullPitByTeam.get(myTeam) ?? null : null;
+  const myTeamOutsideScope =
+    scopeDivision != null &&
+    myTeam != null &&
+    (myTeamPit?.division ?? null) !== scopeDivision;
+
+  const hiddenFavoritesCount = useMemo(() => {
+    if (!scopeDivision) return 0;
+    return favorites.filter((t) => {
+      const p = fullPitByTeam.get(t);
+      return p && p.division !== scopeDivision;
+    }).length;
+  }, [favorites, fullPitByTeam, scopeDivision]);
+
+  const sidesToRender: SideConfig[] = useMemo(() => {
+    if (!scopeDivision) return SIDES;
+    const meta = DIVISION_BY_ID[scopeDivision];
+    return [
+      {
+        id: SIDE_BY_DIVISION[scopeDivision].id,
+        name: meta.name,
+        subtitle: `${meta.drape} drape · ${SIDE_BY_DIVISION[scopeDivision].name} · single-division view`,
+        placements: [{ id: scopeDivision, rowOffset: 0, colOffset: 0 }],
+      },
+    ];
+  }, [scopeDivision]);
 
   const exactMatch = useMemo(() => {
     const n = Number(query.trim());
@@ -100,9 +158,13 @@ export default function Home() {
       observers.push(obs);
     });
     return () => observers.forEach((o) => o.disconnect());
-  }, [pits.length]);
+  }, [pits.length, scopeDivision]);
 
   const jumpToPit = (pit: Pit) => {
+    // If the pit is outside the current scope, clear scope so it can render.
+    if (scopeDivision && pit.division !== scopeDivision) {
+      setScopeDivision(null);
+    }
     const sideId = SIDE_BY_DIVISION[pit.division].id;
     setActiveSide(sideId);
     setHighlightedTeam(pit.team);
@@ -189,6 +251,48 @@ export default function Home() {
           </div>
         )}
 
+        {scopeDivision && (
+          <section className="rounded-xl border border-amber-700/40 bg-amber-950/15 px-4 py-3 flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <span className="text-[10px] uppercase tracking-widest text-amber-300/80">
+                Scoped
+              </span>
+              <span
+                className={`w-2 h-2 rounded-full ${DIVISION_BY_ID[scopeDivision].swatch}`}
+              />
+              <span className="font-bold text-amber-200">
+                {DIVISION_BY_ID[scopeDivision].name}
+              </span>
+              <span className="text-[11px] text-neutral-500">
+                · {pitByTeam.size} teams
+              </span>
+            </div>
+            <button
+              onClick={() => setScopeDivision(null)}
+              className="text-xs px-3 py-1 rounded-full bg-neutral-800 text-neutral-200 hover:bg-neutral-700"
+            >
+              Show all divisions
+            </button>
+          </section>
+        )}
+
+        {myTeamOutsideScope && myTeamPit && (
+          <div className="rounded-xl border border-rose-900/40 bg-rose-950/20 px-4 py-2.5 text-xs text-rose-200 flex items-center gap-2 flex-wrap">
+            <span aria-hidden>⚠</span>
+            <span>
+              Your team <strong className="tabular-nums">{myTeam}</strong> is in{" "}
+              <strong>{DIVISION_BY_ID[myTeamPit.division].name}</strong> — outside
+              the current scope.
+            </span>
+            <button
+              onClick={() => setScopeDivision(myTeamPit.division)}
+              className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-200 hover:bg-neutral-700"
+            >
+              Switch scope
+            </button>
+          </div>
+        )}
+
         <MyTeamCard
           myTeam={myTeam}
           myPit={myTeam != null ? pitByTeam.get(myTeam) ?? null : null}
@@ -197,12 +301,31 @@ export default function Home() {
         />
 
         <FavoritesList
-          favorites={favorites}
+          favorites={
+            scopeDivision
+              ? favorites.filter(
+                  (t) => fullPitByTeam.get(t)?.division === scopeDivision
+                )
+              : favorites
+          }
           pitByTeam={pitByTeam}
           onToggle={toggle}
           onJump={jumpToPit}
           onClear={clear}
         />
+
+        {scopeDivision && hiddenFavoritesCount > 0 && (
+          <p className="text-[11px] text-neutral-500 -mt-3">
+            + {hiddenFavoritesCount} favorite
+            {hiddenFavoritesCount === 1 ? "" : "s"} hidden in other divisions.{" "}
+            <button
+              onClick={() => setScopeDivision(null)}
+              className="underline hover:text-neutral-300"
+            >
+              Show all
+            </button>
+          </p>
+        )}
 
         <RoutePlanner
           pits={pits}
@@ -213,67 +336,107 @@ export default function Home() {
           autoAvoidTeams={queueingTeams}
           onPlan={setRoutes}
           onJumpToStop={jumpToPit}
+          scopeDivision={scopeDivision}
         />
 
-        <TbaQueueWatcher onQueueingChange={setQueueingTeams} />
+        <TbaQueueWatcher
+          onQueueingChange={setQueueingTeams}
+          divisionKey={
+            scopeDivision ? EVENT_KEY_BY_DIVISION[scopeDivision] : undefined
+          }
+        />
 
         <LocationPanel />
 
         <Legend />
 
-        <nav className="flex flex-wrap items-center gap-2 sticky top-[88px] z-20 bg-neutral-950 py-2 -mx-1 px-1 border-b border-neutral-800/80">
-          {SIDES.map((s) => (
+        <nav className="sticky top-[88px] z-20 bg-neutral-950 py-2 -mx-1 px-1 border-b border-neutral-800/80 space-y-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-widest text-neutral-500 mr-1">
+              Scope
+            </span>
             <button
-              key={s.id}
-              onClick={() => {
-                setActiveSide(s.id);
-                sectionRefs.current[s.id]?.scrollIntoView({
-                  behavior: "smooth",
-                  block: "start",
-                });
-              }}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition ${
-                activeSide === s.id
+              onClick={() => setScopeDivision(null)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition ${
+                scopeDivision === null
                   ? "bg-amber-500 text-neutral-950 border-amber-400 font-semibold"
                   : "bg-neutral-900 text-neutral-300 border-neutral-800 hover:border-neutral-600"
               }`}
             >
-              {s.name}
-              <span className="text-[10px] opacity-70">({s.subtitle.split(" · ").length} divs)</span>
+              All
             </button>
-          ))}
-          <div
-            className="ml-auto inline-flex rounded-full border border-neutral-800 bg-neutral-900 p-0.5"
-            role="group"
-            aria-label="Map size"
-          >
-            {(["XS", "S", "M", "L"] as const).map((sz) => (
+            {DIVISIONS.map((d) => (
               <button
-                key={sz}
-                onClick={() => setSize(sz)}
-                className={`text-[11px] h-6 px-2 grid place-items-center rounded-full transition ${
-                  size === sz
-                    ? "bg-amber-500 text-neutral-950 font-bold"
-                    : "text-neutral-400 hover:text-neutral-100"
+                key={d.id}
+                onClick={() => setScopeDivision(d.id)}
+                className={`text-xs px-2.5 py-1 rounded-full border transition flex items-center gap-1.5 ${
+                  scopeDivision === d.id
+                    ? "bg-amber-500 text-neutral-950 border-amber-400 font-semibold"
+                    : "bg-neutral-900 text-neutral-300 border-neutral-800 hover:border-neutral-600"
                 }`}
-                title={
-                  sz === "XS"
-                    ? "Extra small — fit the whole hall on screen"
-                    : sz === "S"
-                    ? "Small — see more of the map at once"
-                    : sz === "M"
-                    ? "Medium (default)"
-                    : "Large — easier to read"
-                }
               >
-                {sz}
+                <span className={`w-2 h-2 rounded-full ${d.swatch}`} />
+                {d.name}
               </button>
             ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {!scopeDivision &&
+              SIDES.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setActiveSide(s.id);
+                    sectionRefs.current[s.id]?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    });
+                  }}
+                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition ${
+                    activeSide === s.id
+                      ? "bg-amber-500 text-neutral-950 border-amber-400 font-semibold"
+                      : "bg-neutral-900 text-neutral-300 border-neutral-800 hover:border-neutral-600"
+                  }`}
+                >
+                  {s.name}
+                  <span className="text-[10px] opacity-70">
+                    ({s.subtitle.split(" · ").length} divs)
+                  </span>
+                </button>
+              ))}
+            <div
+              className="ml-auto inline-flex rounded-full border border-neutral-800 bg-neutral-900 p-0.5"
+              role="group"
+              aria-label="Map size"
+            >
+              {(["XS", "S", "M", "L"] as const).map((sz) => (
+                <button
+                  key={sz}
+                  onClick={() => setSize(sz)}
+                  className={`text-[11px] h-6 px-2 grid place-items-center rounded-full transition ${
+                    size === sz
+                      ? "bg-amber-500 text-neutral-950 font-bold"
+                      : "text-neutral-400 hover:text-neutral-100"
+                  }`}
+                  title={
+                    sz === "XS"
+                      ? "Extra small — fit the whole hall on screen"
+                      : sz === "S"
+                      ? "Small — see more of the map at once"
+                      : sz === "M"
+                      ? "Medium"
+                      : "Large — easier to read"
+                  }
+                >
+                  {sz}
+                </button>
+              ))}
+            </div>
           </div>
         </nav>
 
         <div className="space-y-6">
-          {SIDES.map((s) => (
+          {sidesToRender.map((s) => (
             <div
               key={s.id}
               ref={(el) => {
@@ -283,7 +446,7 @@ export default function Home() {
             >
               <SideMap
                 side={s}
-                pits={pits}
+                pits={scopedPits}
                 highlightedTeam={highlightedTeam}
                 favorites={favorites}
                 size={size}
