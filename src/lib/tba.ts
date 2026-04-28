@@ -1,6 +1,8 @@
 // Thin client for our /api/tba/* proxy. The browser never sees the auth key
 // — the server route attaches it. All requests are GET-only.
 
+import type { DivisionId } from "./types";
+
 export interface TbaMatch {
   key: string;
   comp_level: string;
@@ -42,6 +44,19 @@ export const HOUSTON_2026_DIVISION_KEYS = [
   "2026mil",
   "2026new",
 ] as const;
+
+export type HoustonEventKey = (typeof HOUSTON_2026_DIVISION_KEYS)[number];
+
+export const EVENT_KEY_BY_DIVISION: Record<DivisionId, HoustonEventKey> = {
+  archimedes: "2026arc",
+  curie: "2026cur",
+  daly: "2026dal",
+  galileo: "2026gal",
+  hopper: "2026hop",
+  johnson: "2026joh",
+  milstein: "2026mil",
+  newton: "2026new",
+};
 
 export async function fetchAllHoustonMatches(): Promise<{
   matches: TbaMatch[];

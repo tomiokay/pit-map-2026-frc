@@ -3,22 +3,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchAllHoustonMatches,
+  fetchEventMatches,
   HOUSTON_2026_DIVISION_KEYS,
   shouldRefreshSchedule,
   teamsCurrentlyQueueing,
+  type HoustonEventKey,
   type QueueingTeam,
   type TbaMatch,
 } from "@/lib/tba";
 
 interface Props {
   onQueueingChange: (teams: number[]) => void;
+  /** When set, only watch this single division's matches instead of all 8. */
+  divisionKey?: HoustonEventKey;
 }
 
 const TICK_MS = 60_000;
 const WINDOW_S = 300;
 const ENABLED_KEY = "pit-map-tba-enabled-v1";
 
-export function TbaQueueWatcher({ onQueueingChange }: Props) {
+export function TbaQueueWatcher({ onQueueingChange, divisionKey }: Props) {
+  const watchedKeys = divisionKey ? [divisionKey] : HOUSTON_2026_DIVISION_KEYS;
   const [open, setOpen] = useState(false);
   const [enabled, setEnabled] = useState(true);
   const [queueing, setQueueing] = useState<QueueingTeam[]>([]);
@@ -47,11 +52,16 @@ export function TbaQueueWatcher({ onQueueingChange }: Props) {
     setIsLoading(true);
     setError(null);
     try {
-      const { matches, failedDivisions: failed } = await fetchAllHoustonMatches();
-      matchesRef.current = matches;
-      setFailedDivisions(failed);
+      const result = divisionKey
+        ? await fetchEventMatches(divisionKey).then(
+            (matches) => ({ matches, failedDivisions: [] as string[] }),
+            () => ({ matches: [] as TbaMatch[], failedDivisions: [divisionKey] })
+          )
+        : await fetchAllHoustonMatches();
+      matchesRef.current = result.matches;
+      setFailedDivisions(result.failedDivisions);
       setLastFetched(Date.now());
-      if (failed.length === HOUSTON_2026_DIVISION_KEYS.length) {
+      if (result.failedDivisions.length === watchedKeys.length) {
         setError("Couldn’t reach TBA — check your TBA_AUTH_KEY env var.");
       }
       recompute();
@@ -61,7 +71,7 @@ export function TbaQueueWatcher({ onQueueingChange }: Props) {
     } finally {
       setIsLoading(false);
     }
-  }, [onQueueingChange, recompute]);
+  }, [divisionKey, onQueueingChange, recompute, watchedKeys.length]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -123,11 +133,14 @@ export function TbaQueueWatcher({ onQueueingChange }: Props) {
       {open && (
         <div className="px-4 pb-4 space-y-3">
           <p className="text-[11px] text-neutral-400">
-            Pulls match schedules for all 8 Houston divisions ({" "}
-            {HOUSTON_2026_DIVISION_KEYS.join(", ")}) from The Blue Alliance and
-            auto-adds teams queueing or on the field within the next{" "}
-            {WINDOW_S / 60} min to your route’s avoid list. Refreshes every
-            minute.
+            {divisionKey
+              ? `Watching only ${divisionKey} matches.`
+              : `Pulls match schedules for all 8 Houston divisions (${HOUSTON_2026_DIVISION_KEYS.join(
+                  ", "
+                )})`}{" "}
+            from The Blue Alliance and auto-adds teams queueing or on the field
+            within the next {WINDOW_S / 60} min to your route’s avoid list.
+            Refreshes every minute.
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -157,7 +170,7 @@ export function TbaQueueWatcher({ onQueueingChange }: Props) {
           </div>
           {error && <p className="text-xs text-rose-300">{error}</p>}
           {failedDivisions.length > 0 &&
-            failedDivisions.length < HOUSTON_2026_DIVISION_KEYS.length && (
+            failedDivisions.length < watchedKeys.length && (
               <p className="text-[11px] text-amber-300/80">
                 Some divisions returned errors:{" "}
                 {failedDivisions.join(", ")}. Other divisions are still being
