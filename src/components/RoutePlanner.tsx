@@ -3,23 +3,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DivisionId, Pit } from "@/lib/types";
 import { DIVISION_BY_ID } from "@/lib/divisions";
-import { SIDES, SIDE_BY_DIVISION } from "@/lib/sides";
+import { SIDES } from "@/lib/sides";
 import {
-  buildWalkableGrid,
-  placePitsOnSide,
-  planRoute,
-  type RoutePlan,
+  planMultiSideRoute,
+  type PlannedSideRoute,
 } from "@/lib/router";
 import {
   useCurrentRouteDraft,
   useSavedRoutes,
   type SavedRoute,
 } from "@/lib/store";
-
-export interface PlannedSideRoute {
-  sideId: string;
-  plan: RoutePlan;
-}
 
 interface Props {
   pits: Pit[];
@@ -126,80 +119,10 @@ export function RoutePlanner({
     if (myTeam == null) return [];
     const homePit = pitByTeam.get(myTeam);
     if (!homePit) return [];
-    const homeSideId = SIDE_BY_DIVISION[homePit.division].id;
-    const recognizedList = teams
-      .map((t) => ({ team: t, pit: pitByTeam.get(t) ?? null }))
-      .filter((r): r is { team: number; pit: Pit } => r.pit !== null);
-    const otherHallHasVisits = recognizedList.some(
-      (r) => SIDE_BY_DIVISION[r.pit.division].id !== homeSideId
-    );
-
-    const plans: PlannedSideRoute[] = [];
-    // Visit the home hall first, then the other hall, so the trip reads as
-    // one continuous walk: home → home-hall stops → concourse → other-hall
-    // stops → concourse → home.
-    const orderedSides = [...SIDES].sort((a, b) =>
-      a.id === homeSideId ? -1 : b.id === homeSideId ? 1 : 0
-    );
-    for (const side of orderedSides) {
-      const placed = placePitsOnSide(side, pits);
-      const grid = buildWalkableGrid(placed);
-      const sidePits = new Set(side.placements.map((p) => p.id));
-
-      const homePlaced = placed.find(
-        (p) => p.division === homePit.division && p.id === homePit.id
-      );
-      const visits = recognizedList
-        .filter((r) => sidePits.has(r.pit.division))
-        .map((r) =>
-          placed.find((p) => p.division === r.pit.division && p.id === r.pit.id)!
-        )
-        .filter(Boolean);
-
-      if (visits.length === 0) continue;
-
-      let anchor = homePlaced;
-      let stopsList = visits;
-      let endAt: typeof visits[0] | undefined = undefined;
-      const isHomeHall = side.id === homeSideId;
-
-      // Pick the concourse-facing edge for this side:
-      //   left side (Hall A) → exits/enters on its RIGHT edge
-      //   right side (Hall E) → exits/enters on its LEFT edge
-      const concourseSortByCol = (a: typeof visits[0], b: typeof visits[0]) =>
-        side.id === "left" ? b.gridCol - a.gridCol : a.gridCol - b.gridCol;
-
-      if (!homePlaced) {
-        // Other hall — anchor at the concourse-side edge so we enter/exit
-        // closest to the home hall.
-        const sorted = [...visits].sort(concourseSortByCol);
-        anchor = sorted[0];
-        stopsList = sorted.slice(1);
-      } else if (otherHallHasVisits && visits.length > 0) {
-        // Home hall, but the trip continues to the other hall after this.
-        // End on the concourse-side edge so the user can walk straight to
-        // the other hall (Hall A ends on the right, Hall E ends on the left).
-        const sorted = [...visits].sort(concourseSortByCol);
-        endAt = sorted[0];
-      }
-      if (!anchor) continue;
-
-      // Plan-options:
-      //   home hall, no other-hall stops → respect the "return to my pit" toggle
-      //   home hall, with other-hall stops → end at concourse-side edge, no return
-      //   other hall → loop back to anchor so the user can retrace through concourse
-      const planReturn = isHomeHall
-        ? otherHallHasVisits
-          ? false
-          : rh
-        : true;
-      const plan = planRoute(anchor, stopsList, grid, {
-        returnHome: planReturn,
-        endAt,
-      });
-      plans.push({ sideId: side.id, plan });
-    }
-    return plans;
+    const targets = teams
+      .map((t) => pitByTeam.get(t))
+      .filter((p): p is Pit => p != null);
+    return planMultiSideRoute(pits, homePit, targets, { returnHome: rh });
   };
 
   const handlePlan = () => {

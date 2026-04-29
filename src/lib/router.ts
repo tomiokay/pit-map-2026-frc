@@ -1,5 +1,5 @@
 import type { Pit } from "./types";
-import type { SideConfig } from "./sides";
+import { SIDES, SIDE_BY_DIVISION, type SideConfig } from "./sides";
 
 /** A pit positioned on a side's combined grid. */
 export interface PlacedPit extends Pit {
@@ -412,4 +412,81 @@ export function pathToPixels(
     x: colStart[c] + (colSizes[c] ?? 0) / 2,
     y: rowStart[r] + (rowSizes[r] ?? 0) / 2,
   }));
+}
+
+export interface PlannedSideRoute {
+  sideId: string;
+  plan: RoutePlan;
+}
+
+/**
+ * Plan a route that may span both halls. The trip reads as one continuous
+ * walk: home → home-hall stops → concourse → other-hall stops → concourse →
+ * home (when returnHome is true).
+ *
+ * Returns one RoutePlan per side that has visits.
+ */
+export function planMultiSideRoute(
+  pits: Pit[],
+  homePit: Pit,
+  targets: Pit[],
+  options: { returnHome: boolean }
+): PlannedSideRoute[] {
+  const homeSideId = SIDE_BY_DIVISION[homePit.division].id;
+  const otherHallHasVisits = targets.some(
+    (t) => SIDE_BY_DIVISION[t.division].id !== homeSideId
+  );
+  const orderedSides = [...SIDES].sort((a, b) =>
+    a.id === homeSideId ? -1 : b.id === homeSideId ? 1 : 0
+  );
+
+  const plans: PlannedSideRoute[] = [];
+  for (const side of orderedSides) {
+    const placed = placePitsOnSide(side, pits);
+    const grid = buildWalkableGrid(placed);
+    const sideDivisions = new Set(side.placements.map((p) => p.id));
+
+    const homePlaced = placed.find(
+      (p) => p.division === homePit.division && p.id === homePit.id
+    );
+    const visits = targets
+      .filter((t) => sideDivisions.has(t.division))
+      .map((t) => placed.find((p) => p.division === t.division && p.id === t.id))
+      .filter((p): p is PlacedPit => p != null);
+
+    if (visits.length === 0) continue;
+
+    let anchor = homePlaced;
+    let stopsList = visits;
+    let endAt: PlacedPit | undefined;
+    const isHomeHall = side.id === homeSideId;
+
+    // Concourse-facing edge:
+    //   left side (Hall A) exits on its RIGHT edge
+    //   right side (Hall E) exits on its LEFT edge
+    const concourseSortByCol = (a: PlacedPit, b: PlacedPit) =>
+      side.id === "left" ? b.gridCol - a.gridCol : a.gridCol - b.gridCol;
+
+    if (!homePlaced) {
+      const sorted = [...visits].sort(concourseSortByCol);
+      anchor = sorted[0];
+      stopsList = sorted.slice(1);
+    } else if (otherHallHasVisits && visits.length > 0) {
+      const sorted = [...visits].sort(concourseSortByCol);
+      endAt = sorted[0];
+    }
+    if (!anchor) continue;
+
+    const planReturn = isHomeHall
+      ? otherHallHasVisits
+        ? false
+        : options.returnHome
+      : true;
+    const plan = planRoute(anchor, stopsList, grid, {
+      returnHome: planReturn,
+      endAt,
+    });
+    plans.push({ sideId: side.id, plan });
+  }
+  return plans;
 }

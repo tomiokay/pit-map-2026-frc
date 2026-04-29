@@ -14,7 +14,8 @@ import { Legend } from "@/components/Legend";
 import { SiteLoadCounter } from "@/components/SiteLoadCounter";
 import { LocationPanel } from "@/components/LocationPanel";
 import { MyTeamCard } from "@/components/MyTeamCard";
-import { RoutePlanner, type PlannedSideRoute } from "@/components/RoutePlanner";
+import { RoutePlanner } from "@/components/RoutePlanner";
+import { planMultiSideRoute, type PlannedSideRoute } from "@/lib/router";
 import { TbaQueueWatcher } from "@/components/TbaQueueWatcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -104,6 +105,14 @@ export default function Home() {
     if (!query.trim() || Number.isNaN(n)) return null;
     return pitByTeam.get(n) ?? null;
   }, [query, pitByTeam]);
+
+  const searchRoutes: PlannedSideRoute[] = useMemo(() => {
+    const homePit = myTeam != null ? fullPitByTeam.get(myTeam) ?? null : null;
+    if (!homePit || !exactMatch) return [];
+    if (exactMatch.team === myTeam) return [];
+    if (scopeDivision && homePit.division !== scopeDivision) return [];
+    return planMultiSideRoute(pits, homePit, [exactMatch], { returnHome: false });
+  }, [exactMatch, fullPitByTeam, myTeam, pits, scopeDivision]);
 
   useEffect(() => {
     if (exactMatch) {
@@ -451,7 +460,11 @@ export default function Home() {
                 favorites={favorites}
                 size={size}
                 myTeam={myTeam}
-                route={routes.find((r) => r.sideId === s.id)?.plan ?? null}
+                route={
+                  searchRoutes.find((r) => r.sideId === s.id)?.plan ??
+                  routes.find((r) => r.sideId === s.id)?.plan ??
+                  null
+                }
                 activeLeg={activeLeg}
                 onPitClick={(pit) => {
                   if (pit.team !== null) {
