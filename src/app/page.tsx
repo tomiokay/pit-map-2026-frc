@@ -461,9 +461,9 @@ export default function Home() {
                 size={size}
                 myTeam={myTeam}
                 route={
-                  searchRoutes.find((r) => r.sideId === s.id)?.plan ??
-                  routes.find((r) => r.sideId === s.id)?.plan ??
-                  null
+                  searchRoutes.length > 0
+                    ? searchRoutes.find((r) => r.sideId === s.id)?.plan ?? null
+                    : routes.find((r) => r.sideId === s.id)?.plan ?? null
                 }
                 activeLeg={activeLeg}
                 onPitClick={(pit) => {
